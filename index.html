@@ -1,0 +1,56 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>브이월드 3D 지도 - CSV 좌표 이동</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script type="text/javascript" src="js/config.js"></script>
+    <script type="text/javascript">
+      (function () {
+        var domain = (typeof VWORLD_DOMAIN !== 'undefined' && VWORLD_DOMAIN) ? VWORLD_DOMAIN : location.host;
+        var url = 'https://map.vworld.kr/js/webglMapInit.js.do?version=3.0&apiKey=' +
+                  (typeof VWORLD_API_KEY !== 'undefined' ? encodeURIComponent(VWORLD_API_KEY) : '') +
+                  '&domain=' + encodeURIComponent(domain);
+        document.write('<script src="' + url + '"><\/script>');
+      })();
+    </script>
+    <script type="text/javascript" src="js/csv.js"></script>
+    <script type="text/javascript" src="js/main.js"></script>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div id="panel">
+        <div class="panel-head">
+            <h1>3D 지도 좌표 이동</h1>
+            <p class="hint">VWORLD 3D · CSV 업로드 후 좌표 이동</p>
+        </div>
+
+        <div class="upload-area">
+            <label for="file-input" id="file-label">📂 CSV 파일 선택</label>
+            <input type="file" id="file-input" accept=".csv,text/csv,text/plain" style="display:none;" />
+            <p class="hint">또는 지도 영역에 CSV 파일을 드래그 &amp; 드롭하세요</p>
+        </div>
+
+        <div class="meta">
+            <div id="meta-count">포인트 수: 0</div>
+            <div id="meta-base">첫 행 고도(보정 기준): -</div>
+        </div>
+
+        <div class="nav-buttons">
+            <button id="btn-first" title="첫 좌표">⏮</button>
+            <button id="btn-prev" title="이전">◀</button>
+            <button id="btn-next" title="다음">▶</button>
+            <button id="btn-last" title="마지막 좌표">⏭</button>
+            <button id="btn-home" title="초기 보기">⌂</button>
+        </div>
+
+        <div class="list-wrap">
+            <div id="point-list"></div>
+        </div>
+    </div>
+
+    <div id="status" class="status">브이월드 3D 지도를 불러오는 중...</div>
+</body>
+</html>

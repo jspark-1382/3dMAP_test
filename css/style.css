@@ -1,0 +1,176 @@
+/* ============================================================
+   브이월드 3D 지도 스타일
+   ============================================================ */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    font-family: "Malgun Gothic", "Segoe UI", Arial, sans-serif;
+    color: #1f2937;
+    overflow: hidden;
+}
+
+#map {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* ---- 사이드 패널 ---- */
+#panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 320px;
+    max-height: calc(100% - 78px);
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    overflow: hidden;
+}
+
+.panel-head {
+    padding: 14px 16px 8px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.panel-head h1 {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.panel-head .hint {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+.upload-area {
+    padding: 12px 16px 8px;
+}
+
+#file-label {
+    display: block;
+    text-align: center;
+    background: #2563eb;
+    color: #fff;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+#file-label:hover {
+    background: #1d4ed8;
+}
+
+.upload-area .hint {
+    font-size: 11px;
+    color: #6b7280;
+    text-align: center;
+    margin-top: 6px;
+}
+
+.meta {
+    padding: 6px 16px;
+    font-size: 12px;
+    color: #374151;
+    line-height: 1.6;
+}
+
+.nav-buttons {
+    padding: 0 16px 10px;
+    display: flex;
+    gap: 6px;
+}
+
+.nav-buttons button {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 14px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.nav-buttons button:hover {
+    background: #f3f4f6;
+}
+
+.list-wrap {
+    overflow-y: auto;
+    padding: 4px 12px 12px;
+    border-top: 1px solid #e5e7eb;
+    flex: 1;
+    min-height: 0;
+}
+
+.point-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s;
+}
+
+.point-item:hover {
+    background: #f3f4f6;
+}
+
+.point-item.active {
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+
+.point-head {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.point-sub {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+/* ---- 상태 표시줄 ---- */
+#status {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 10;
+    background: rgba(17, 24, 39, 0.85);
+    color: #f9fafb;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    max-width: calc(100% - 360px);
+}
+
+#status.error {
+    background: rgba(220, 38, 38, 0.9);
+}
+
+/* ---- 스크롤바 ---- */
+.list-wrap::-webkit-scrollbar {
+    width: 8px;
+}
+
+.list-wrap::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
