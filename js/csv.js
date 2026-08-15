@@ -67,10 +67,11 @@ var CSV = (function () {
 
     // 헤더에서 컬럼 인덱스 찾기 (부분일치 키워드)
     function mapColumns(headers) {
-        var result = { latitude: -1, longitude: -1, altitude: -1, headers: headers };
+        var result = { latitude: -1, longitude: -1, altitude: -1, rsrp: -1, headers: headers };
         result.extra = [];
         for (var i = 0; i < headers.length; i++) {
             var h = String(headers[i]).toLowerCase();
+            if (result.rsrp === -1 && h.indexOf("rsrp") !== -1) { result.rsrp = i; }
             if (result.latitude === -1 && h.indexOf("latitude") !== -1) {
                 result.latitude = i;
             } else if (result.longitude === -1 && h.indexOf("longitude") !== -1) {
@@ -149,6 +150,7 @@ var CSV = (function () {
             }
 
             var point = {
+                rsrp: cols.rsrp >= 0 ? parseNumber(cells[cols.rsrp]) : NaN,
                 idx: r,
                 lat: lat,
                 lon: lon,
@@ -171,3 +173,4 @@ var CSV = (function () {
         parse: parse
     };
 })();
+

@@ -174,3 +174,67 @@ html, body {
     background: #cbd5e1;
     border-radius: 4px;
 }
+/* ---- RSRP 범례 ---- */
+#legend {
+    position: absolute;
+    left: 12px;
+    bottom: 64px;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.94);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    padding: 8px 12px;
+    font-size: 12px;
+    display: none;
+}
+
+#legend.show {
+    display: block;
+}
+
+.legend-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.legend-color {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.legend-label {
+    color: #374151;
+}
+
+/* ---- 두 점 거리 측정 ---- */
+#measure-result {
+    position: absolute;
+    left: 12px;
+    bottom: 128px;
+    z-index: 10;
+    background: rgba(17, 24, 39, 0.9);
+    color: #ffffff;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.nav-buttons button.active {
+    background: #2563eb;
+    color: #fff;
+    border-color: #2563eb;
+}

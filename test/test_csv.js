@@ -15,8 +15,9 @@ console.log("포인트 수:", result.points.length);
 console.log("헤더:", result.headers);
 if (result.points.length > 0) {
     var p = result.points[0];
-    console.log("첫번째 포인트: 경도=" + p.lon + ", 위도=" + p.lat + ", 원본고도=" + p.alt + ", 적용고도=" + p.appliedAlt);
+    console.log("첫번째 포인트: 경도=" + p.lon + ", 위도=" + p.lat + ", 원본고도=" + p.alt + ", 적용고도=" + p.appliedAlt + ", RSRP=" + p.rsrp);
     var p2 = result.points[1];
     console.log("두번째 포인트: 경도=" + p2.lon + ", 위도=" + p2.lat + ", 원본고도=" + p2.alt + ", 적용고도=" + p2.appliedAlt);
     console.log("부가정보(첫행):", JSON.stringify(p.extra));
 }
+
