@@ -238,3 +238,87 @@ html, body {
     color: #fff;
     border-color: #2563eb;
 }
+
+/* ---- 기지국 / 예측 구간 ---- */
+.tx-section, .pred-section {
+    padding: 8px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.section-title {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: #374151;
+}
+
+.tx-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+    align-items: center;
+}
+
+.tx-inp {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    outline: none;
+    width: 0;
+    min-width: 0;
+}
+
+.tx-inp:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.tx-label {
+    font-size: 11px;
+    color: #6b7280;
+    white-space: nowrap;
+}
+
+.tx-btn {
+    display: block;
+    width: 100%;
+    padding: 7px 0;
+    font-size: 12px;
+    font-weight: 600;
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.tx-btn:hover {
+    background: #1d4ed8;
+}
+
+.tx-btn.active {
+    background: #059669;
+}
+
+/* ---- VWORLD/Cesium 기본 UI 숨김 (패널 겹침 방지) ---- */
+.cesium-viewer-bottom,
+.cesium-viewer-toolbar,
+.cesium-widget-credits,
+.cesium-viewer-animationContainer,
+.cesium-viewer-timelineContainer,
+.cesium-viewer-fullscreenContainer,
+.cesium-sceneModePicker-wrapper,
+.cesium-geocoder-wrapper {
+    display: none !important;
+}
+
+/* 패널 우측 상단 여유 공간 확보 */
+#panel {
+    top: 12px;
+    right: 12px;
+    max-height: calc(100% - 24px);
+    z-index: 100;
+}

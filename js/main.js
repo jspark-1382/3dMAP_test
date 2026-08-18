@@ -214,6 +214,8 @@ var MAIN = (function () {
             }
 
             clearMarkers();
+            clearPrediction();
+            clearTxMarker();
             rsrpBins = computeRsrpBins(points);
             for (var i = 0; i < points.length; i++) addMarker(points[i]);
             renderLegend();
@@ -329,8 +331,8 @@ var MAIN = (function () {
                     new vw.CoordZ(DEFAULT_VIEW.longitude, DEFAULT_VIEW.latitude, DEFAULT_VIEW.altitude),
                     new vw.Direction(0, -90, 0)
                 ),
-                logo: true,
-                navigation: true
+                logo: false,
+                navigation: false
             };
             map = new vw.Map();
             map.setOption(opts);
@@ -407,6 +409,9 @@ var MAIN = (function () {
             setStatus("측정 초기화");
         });
 
+        $("btn-tx-apply").addEventListener("click", function () { setTxFromInput(); updateTxMarker(); });
+        $("btn-predict").addEventListener("click", togglePrediction);
+
         setStatus("브이월드 3D 지도를 불러오는 중...");
     }
 
@@ -415,5 +420,189 @@ var MAIN = (function () {
         waitForLibrary();// 브이월드 라이브러리(vw) 준비 대기 후 지도 생성
     });
 
+    // ================== 기지국 / 예측 구간 ==================
+    var txRef = null;        // { lon, lat, alt, rsrpRef } 사용자 입력 기지국
+    var predictionEntities = [];
+    var predictionPrimitive = null;
+    var predictionVisible = false;
+    var txEntity = null;
+
+    function setTxFromInput() {
+        var lon = parseFloat($("tx-lon").value);
+        var lat = parseFloat($("tx-lat").value);
+        if (isNaN(lon) || isNaN(lat)) { setStatus("기지국 좌표를 올바르게 입력하세요.", true); return; }
+        var alt = parseFloat($("tx-alt").value) || 0;
+        txRef = { lon: lon, lat: lat, alt: alt };
+        setStatus("기지국 설정: (" + fmt(lon) + ", " + fmt(lat) + ")");
+    }
+
+    function getTxRef() {
+        if (txRef) return txRef;
+        if (!points.length) return null;
+        var best = points[0], maxR = -999;
+        for (var i = 0; i < points.length; i++) {
+            var r = Number(points[i].rsrp);
+            if (!isNaN(r) && r > maxR) { maxR = r; best = points[i]; }
+        }
+        if (maxR === -999) return null;
+        return { lon: best.lon, lat: best.lat, alt: best.appliedAlt };
+    }
+
+    function calibrateModel(ref, pts) {
+        // OLS linear regression: RSRP = RSRP_0 - n * 10 * log10(d)
+        var sumX = 0, sumY = 0, sumXY = 0, sumXX = 0, count = 0;
+        for (var i = 0; i < pts.length; i++) {
+            var r = Number(pts[i].rsrp);
+            if (isNaN(r)) continue;
+            var d = distanceM(ref.lon, ref.lat, pts[i].lon, pts[i].lat);
+            if (d < 1) continue;
+            var x = 10 * Math.log10(d);
+            sumX += x; sumY += r; sumXY += x * r; sumXX += x * x;
+            count++;
+        }
+        var rsrp0 = -70, n = 3.5;
+        if (count > 1) {
+            var denom = count * sumXX - sumX * sumX;
+            if (Math.abs(denom) > 1e-10) {
+                n = (count * sumXY - sumX * sumY) / denom;
+                rsrp0 = (sumY + n * sumX) / count; // RSRP_0 intercept
+            }
+        }
+        if (n < 1 || n > 6) n = 3.5;
+        return { ref: ref, rsrp0: rsrp0, n: n };
+    }
+
+    function distanceM(lon1, lat1, lon2, lat2) {
+        var R = 6371000;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function generatePredictionGrid(ref, pts) {
+        var maxDist = 25;
+        for (var i = 0; i < pts.length; i++) {
+            var d = distanceM(ref.lon, ref.lat, pts[i].lon, pts[i].lat);
+            if (d > maxDist) maxDist = d;
+        }
+        var radius = maxDist * 1.5;
+        var spacing = parseFloat($("pred-spacing").value) || 50;
+        var avgLat = ref.lat;
+        var degLat = spacing / 111320;
+        var degLon = spacing / (111320 * Math.cos(avgLat * Math.PI / 180));
+        var spanDeg = radius / 111320;
+        var cLat = Math.cos(avgLat * Math.PI / 180);
+        var fromLat = ref.lat - spanDeg;
+        var toLat = ref.lat + spanDeg;
+        var fromLon = ref.lon - spanDeg / (cLat || 1);
+        var toLon = ref.lon + spanDeg / (cLat || 1);
+        var grid = [];
+        for (var lat = fromLat; lat <= toLat; lat += degLat) {
+            for (var lon = fromLon; lon <= toLon; lon += degLon) {
+                var dd = distanceM(ref.lon, ref.lat, lon, lat);
+                if (dd > radius) continue;
+                grid.push({ lon: lon, lat: lat, d: dd });
+            }
+        }
+        return grid;
+    }
+
+    function renderPrediction(calib, grid) {
+        clearPrediction();
+        var viewer = getViewer();
+        if (!viewer || !window.Cesium) return;
+        // 측정 경로 폴리라인
+        if (points.length > 1) {
+            var pathPositions = [];
+            for (var i = 0; i < points.length; i++) {
+                pathPositions.push(Cesium.Cartesian3.fromDegrees(points[i].lon, points[i].lat, points[i].appliedAlt));
+            }
+            var pathEnt = viewer.entities.add({
+                polyline: { positions: pathPositions, width: 2, material: Cesium.Color.GRAY.withAlpha(0.7) }
+            });
+            predictionEntities.push(pathEnt);
+        }
+        // 예측 점들
+        var collection = new Cesium.PointPrimitiveCollection();
+        for (var j = 0; j < grid.length; j++) {
+            var g = grid[j];
+            var predictedRSRP = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
+            var colorStr = colorForRsrp(predictedRSRP);
+            var col = Cesium.Color.fromCssColorString(colorStr);
+            collection.add({
+                position: Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0),
+                color: col,
+                pixelSize: 6,
+                outlineColor: Cesium.Color.WHITE.withAlpha(0.05),
+                outlineWidth: 1
+            });
+        }
+        viewer.scene.primitives.add(collection);
+        predictionEntities.push(collection);
+        predictionPrimitive = collection;
+        predictionVisible = true;
+        var btn = $("btn-predict");
+        if (btn) btn.classList.add("active");
+        var refStr = " RSRP_0=" + calib.rsrp0.toFixed(1) + " dBm  n=" + calib.n.toFixed(2);
+        setStatus("예측 완료: 격자 " + grid.length + "점, n=" + calib.n.toFixed(2) + refStr);
+    }
+
+    function clearPrediction() {
+        var viewer = getViewer();
+        if (predictionPrimitive && viewer) {
+            try { viewer.scene.primitives.remove(predictionPrimitive); } catch (e) {}
+        }
+        for (var i = 0; i < predictionEntities.length; i++) {
+            if (viewer && predictionEntities[i]) {
+                try { viewer.entities.remove(predictionEntities[i]); } catch (e) {}
+            }
+        }
+        predictionEntities = [];
+        predictionPrimitive = null;
+        predictionVisible = false;
+        var btn = $("btn-predict");
+        if (btn) btn.classList.remove("active");
+    }
+
+    function clearTxMarker() {
+        var viewer = getViewer();
+        if (txEntity && viewer) { try { viewer.entities.remove(txEntity); } catch(e) {} }
+        txEntity = null;
+    }
+
+    function updateTxMarker() {
+        clearTxMarker();
+        var viewer = getViewer();
+        if (!viewer || !window.Cesium) return;
+        var ref = getTxRef();
+        if (!ref) return;
+        txEntity = viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(ref.lon, ref.lat, (ref.alt || 0) + 30),
+            point: { pixelSize: 16, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: { text: "TX", font: "14px sans-serif bold", pixelOffset: new Cesium.Cartesian2(0, -20), style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 3, verticalOrigin: Cesium.VerticalOrigin.BOTTOM }
+        });
+    }
+
+    function togglePrediction() {
+        if (!points.length) { setStatus("먼저 CSV를 업로드하세요.", true); return; }
+        if (!ready || !getViewer()) { setStatus("지도 준비 중...", true); return; }
+        if (predictionVisible) { clearPrediction(); setStatus("예측 구간 숨김"); return; }
+        var ref = getTxRef();
+        if (!ref) { setStatus("기준점을 찾을 수 없습니다.", true); return; }
+        updateTxMarker();
+        var calib = calibrateModel(ref, points);
+        var grid = generatePredictionGrid(calib.ref, points);
+        if (!grid.length) { setStatus("예측 그리드가 비었습니다.", true); return; }
+        renderPrediction(calib, grid);
+    }
     return { flyTo: flyTo, moveTo: moveTo };
 })();
+
+
+
+
+
+
+
+

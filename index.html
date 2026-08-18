@@ -33,6 +33,25 @@
             <p class="hint">또는 지도 영역에 CSV 파일을 드래그 &amp; 드롭하세요</p>
         </div>
 
+        <div class="tx-section">
+            <div class="section-title">📡 기지국 (송신원)</div>
+            <div class="tx-row">
+                <input type="text" id="tx-lon" placeholder="경도" class="tx-inp" />
+                <input type="text" id="tx-lat" placeholder="위도" class="tx-inp" />
+            </div>
+            <div class="tx-row">
+                <input type="text" id="tx-alt" placeholder="고도(m, 선택)" class="tx-inp" />
+</div>
+            <button id="btn-tx-apply" class="tx-btn">기지국 설정</button>
+        </div>
+        <div class="pred-section">
+            <div class="section-title">🔮 예측 구간</div>
+            <div class="tx-row">
+                <input type="text" id="pred-spacing" value="50" class="tx-inp" style="width:80px;" />
+                <span class="tx-label">격자 간격(m)</span>
+            </div>
+            <button id="btn-predict" class="tx-btn">📡 예측 구간 그리기</button>
+        </div>
         <div class="meta">
             <div id="meta-count">포인트 수: 0</div>
             <div id="meta-base">첫 행 고도(보정 기준): -</div>
@@ -58,4 +77,7 @@
     <div id="status" class="status">브이월드 3D 지도를 불러오는 중...</div>
 </body>
 </html>
+
+
+
 
