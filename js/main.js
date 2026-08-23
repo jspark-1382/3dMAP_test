@@ -216,6 +216,7 @@ var MAIN = (function () {
             clearMarkers();
             clearPrediction();
             clearTxMarker();
+            clearBeam();
             rsrpBins = computeRsrpBins(points);
             for (var i = 0; i < points.length; i++) addMarker(points[i]);
             renderLegend();
@@ -412,6 +413,33 @@ var MAIN = (function () {
         $("btn-tx-apply").addEventListener("click", function () { setTxFromInput(); updateTxMarker(); });
         $("btn-predict").addEventListener("click", togglePrediction);
 
+        var beamBtn = $("btn-beam");
+        if (beamBtn) beamBtn.addEventListener("click", toggleBeam);
+        var beamScale = $("beam-scale");
+        if (beamScale) {
+            beamScale.addEventListener("input", function () {
+                var v = parseInt(beamScale.value, 10);
+                var label = $("beam-scale-val");
+                if (label) label.textContent = v + "m";
+                if (beamVisible) { clearBeam(); renderBeam(); }
+            });
+        }
+        ["beam-tilt", "beam-swing"].forEach(function (id) {
+            var inp = $(id);
+            if (inp) {
+                inp.addEventListener("change", function () {
+                    if (beamVisible) { clearBeam(); renderBeam(); }
+                    if (predictionVisible && points.length) refreshPrediction();
+                });
+            }
+        });
+        var calibChk = $("chk-beam-calib");
+        if (calibChk) {
+            calibChk.addEventListener("change", function () {
+                if (predictionVisible && points.length) refreshPrediction();
+            });
+        }
+
         setStatus("브이월드 3D 지도를 불러오는 중...");
     }
 
@@ -448,28 +476,104 @@ var MAIN = (function () {
         return { lon: best.lon, lat: best.lat, alt: best.appliedAlt };
     }
 
+    function useGainCalib() {
+        var chk = $("chk-beam-calib");
+        return !!(chk && chk.checked && window.BEAMPATTERN);
+    }
+
+    // 측정점 i에서의 안테나 이득(dB): TX 기준 고도각/방위각 → 틸트/스윙 반영 패턴 조회
+    function gainAtPoint(ref, pt) {
+        if (!window.BEAMPATTERN) return 0;
+        var d = distanceM(ref.lon, ref.lat, pt.lon, pt.lat);
+        var dh = Math.max(d, 1);              // 수평거리
+        var dz = (pt.appliedAlt || 0) - (ref.alt || 0);
+        var el = Math.atan2(dz, dh) * 180 / Math.PI;
+        var az = BEAMPATTERN.bearingDeg(ref.lon, ref.lat, pt.lon, pt.lat);
+        return BEAMPATTERN.tiltedGain(el, az, getBeamTilt(), getBeamSwing());
+    }
+
     function calibrateModel(ref, pts) {
-        // OLS linear regression: RSRP = RSRP_0 - n * 10 * log10(d)
-        var sumX = 0, sumY = 0, sumXY = 0, sumXX = 0, count = 0;
+        // OLS linear regression: RSRP = RSRP_0 - n * 10 * log10(d) (+ k * G(el))
+        var x1s = [], gs = [], ys = [];
         for (var i = 0; i < pts.length; i++) {
             var r = Number(pts[i].rsrp);
             if (isNaN(r)) continue;
             var d = distanceM(ref.lon, ref.lat, pts[i].lon, pts[i].lat);
             if (d < 1) continue;
-            var x = 10 * Math.log10(d);
-            sumX += x; sumY += r; sumXY += x * r; sumXX += x * x;
-            count++;
+            x1s.push(Math.log10(d));
+            ys.push(r);
+            gs.push(useGainCalib() ? gainAtPoint(ref, pts[i]) : 0);
         }
         var rsrp0 = -70, n = 3.5;
-        if (count > 1) {
-            var denom = count * sumXX - sumX * sumX;
-            if (Math.abs(denom) > 1e-10) {
-                n = (count * sumXY - sumX * sumY) / denom;
-                rsrp0 = (sumY + n * sumX) / count; // RSRP_0 intercept
+        var hasGain = false, k = 0;
+        for (i = 0; i < gs.length; i++) { if (gs[i] !== 0) { hasGain = true; break; } }
+        var sol = null;
+        if (hasGain) {
+            // y = c0 + c1*x + c2*g  →  n = -c1/10, gainCoef = c2
+            sol = BEAMPATTERN.solveOLS3(x1s, gs, ys);
+        }
+        // 절편 재계산 헬퍼: n 고정 시 rsrp0 = mean(y + 10n·x)
+        function refitIntercept(nFixed) {
+            var s = 0;
+            for (var j = 0; j < x1s.length; j++) s += ys[j] + 10 * nFixed * x1s[j];
+            return x1s.length ? s / x1s.length : -70;
+        }
+        // 절편 재계산(이득 고정 k): rsrp0 = mean((y − k·g) + 10n·x)
+        function refitInterceptGain(nFixed, kFixed) {
+            var s = 0;
+            for (var j = 0; j < x1s.length; j++) s += ys[j] - kFixed * gs[j] + 10 * nFixed * x1s[j];
+            return x1s.length ? s / x1s.length : -70;
+        }
+        if (!sol) {
+            // 기존 2변수 피팅(이득 미사용 or 특이)
+            var sol2 = BEAMPATTERN ? BEAMPATTERN.solveOLS2(x1s, ys) : null;
+            if (sol2) {
+                n = -sol2.c1 / 10;
+                rsrp0 = sol2.c0;
+                if (n < 1 || n > 6) { n = Math.max(1, Math.min(6, n)); rsrp0 = refitIntercept(n); }
+            } else {
+                // 최후 폴백: 기존 수식
+                var sumX = 0, sumY = 0, sumXY = 0, sumXX = 0, count = 0;
+                for (i = 0; i < x1s.length; i++) {
+                    sumX += x1s[i]; sumY += ys[i];
+                    sumXY += x1s[i] * ys[i]; sumXX += x1s[i] * x1s[i];
+                    count++;
+                }
+                if (count > 1) {
+                    var denom = count * sumXX - sumX * sumX;
+                    if (Math.abs(denom) > 1e-10) {
+                        n = (count * sumXY - sumX * sumY) / denom / -10;
+                        if (n < 1 || n > 6) n = Math.max(1, Math.min(6, n));
+                        rsrp0 = refitIntercept(n);
+                    }
+                }
+            }
+        } else {
+            n = -sol.c1 / 10;
+            rsrp0 = sol.c0;
+            k = sol.c2;
+            // 물리적 타당성 검사: n∈[1,6], k∈[-0.5,2] 벗어나면
+            // (거리항-이득항 공선형 등 불안정 피팅) → 패턴 신뢰(k=1 고정) 후 2변수 재피팅
+            var stable = (n >= 1 && n <= 6 && k >= -0.5 && k <= 2);
+            if (!stable) {
+                k = 1;
+                var yFix = [];
+                for (i = 0; i < x1s.length; i++) yFix.push(ys[i] - gs[i]);
+                var solF = BEAMPATTERN.solveOLS2(x1s, yFix);
+                if (solF) {
+                    n = -solF.c1 / 10;
+                    rsrp0 = solF.c0;
+                    if (n < 1 || n > 6) {
+                        n = Math.max(1, Math.min(6, n));
+                        rsrp0 = refitInterceptGain(n, k);
+                    }
+                } else {
+                    n = Math.max(1, Math.min(6, n));
+                    rsrp0 = refitInterceptGain(n, k);
+                }
             }
         }
-        if (n < 1 || n > 6) n = 3.5;
-        return { ref: ref, rsrp0: rsrp0, n: n };
+        return { ref: ref, rsrp0: rsrp0, n: n, useGain: !!(hasGain && sol), gainCoef: k };
     }
 
     function distanceM(lon1, lat1, lon2, lat2) {
@@ -528,6 +632,12 @@ var MAIN = (function () {
         for (var j = 0; j < grid.length; j++) {
             var g = grid[j];
             var predictedRSRP = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
+            if (calib.useGain && calib.gainCoef && window.BEAMPATTERN) {
+                // 지상 격자점(고도 0) 기준 고도각/방위각 → 안테나 이득(틸트/스윙 반영)
+                var elDeg = Math.atan2(-(calib.ref.alt || 0), Math.max(g.d, 1)) * 180 / Math.PI;
+                var azDeg = BEAMPATTERN.bearingDeg(calib.ref.lon, calib.ref.lat, g.lon, g.lat);
+                predictedRSRP += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, azDeg, getBeamTilt(), getBeamSwing());
+            }
             var colorStr = colorForRsrp(predictedRSRP);
             var col = Cesium.Color.fromCssColorString(colorStr);
             collection.add({
@@ -545,6 +655,7 @@ var MAIN = (function () {
         var btn = $("btn-predict");
         if (btn) btn.classList.add("active");
         var refStr = " RSRP_0=" + calib.rsrp0.toFixed(1) + " dBm  n=" + calib.n.toFixed(2);
+        if (calib.useGain) refStr += "  이득보정 k=" + calib.gainCoef.toFixed(2);
         setStatus("예측 완료: 격자 " + grid.length + "점, n=" + calib.n.toFixed(2) + refStr);
     }
 
@@ -584,10 +695,184 @@ var MAIN = (function () {
         });
     }
 
-    function togglePrediction() {
-        if (!points.length) { setStatus("먼저 CSV를 업로드하세요.", true); return; }
+    // ================== 안테나 빔패턴 (900MHz 옴니) ==================
+    var beamEntities = [];      // 와이어프레임 폴리라인 엔티티
+    var beamPrimitive = null;   // 표면 프리미티브(지원 시)
+    var beamVisible = false;
+    var beamSurfaceUnsupported = false;
+
+    function getBeamScale() {
+        var v = parseInt($("beam-scale").value, 10);
+        return isNaN(v) ? 500 : v;
+    }
+
+    function getBeamTilt() {
+        var v = parseFloat($("beam-tilt").value);
+        return isNaN(v) ? 0 : v;
+    }
+
+    function getBeamSwing() {
+        var v = parseFloat($("beam-swing").value);
+        return isNaN(v) ? 0 : v;
+    }
+
+    function localToCartesian(e, n, u) {
+        // 로컬 ENU(m) → 절대 ECEF (txRefForBeam 기준, 틸트/스윙 회전 적용)
+        var rp = BEAMPATTERN.rotateENU(e, n, u, getBeamTilt(), getBeamSwing());
+        var p = BEAMPATTERN.enuToEcef(txRefForBeam.lon, txRefForBeam.lat, txRefForBeam.alt || 0, rp.e, rp.n, rp.u);
+        return new Cesium.Cartesian3(p.x, p.y, p.z);
+    }
+
+    var txRefForBeam = null;
+
+    function addBeamPolyline(positions, colorCss, alpha, width) {
+        var viewer = getViewer();
+        var ent = viewer.entities.add({
+            polyline: {
+                positions: positions,
+                width: width,
+                material: Cesium.Color.fromCssColorString(colorCss).withAlpha(alpha),
+                clampToGround: false
+            }
+        });
+        beamEntities.push(ent);
+    }
+
+    function renderBeam() {
+        clearBeam();
+        var viewer = getViewer();
+        if (!viewer || !window.Cesium || !window.BEAMPATTERN) return;
+        var ref = getTxRef();
+        if (!ref) { setStatus("기준점이 없습니다. CSV 업로드 또는 기지국 좌표를 입력하세요.", true); return; }
+        txRefForBeam = ref;
+        var scale = getBeamScale();
+        updateTxMarker();
+
+        // ---- 와이어프레임: 자오선(el 스캔) + 링(az 원) ----
+        for (var az = 0; az < 360; az += 15) {
+            var positions = [];
+            for (var el = -90; el <= 90.0001; el += 5) {
+                var gain = BEAMPATTERN.gainAtElevation(Math.min(el, 90));
+                var amp = Math.pow(10, gain / 20);
+                var r = scale * amp;
+                var arad = az * Math.PI / 180, erad = Math.min(el, 90) * Math.PI / 180;
+                positions.push(localToCartesian(
+                    r * Math.cos(erad) * Math.cos(arad),
+                    r * Math.cos(erad) * Math.sin(arad),
+                    r * Math.sin(erad)));
+            }
+            addBeamPolyline(positions, "#94a3b8", 0.6, 1.5);
+        }
+        for (el = -80; el <= 80.001; el += 10) {
+            var ringPts = [];
+            var gainR = BEAMPATTERN.gainAtElevation(el);
+            var ampR = Math.pow(10, gainR / 20);
+            var rRing = scale * ampR;
+            for (az = 0; az <= 360.001; az += 5) {
+                var a2 = az * Math.PI / 180, e2 = el * Math.PI / 180;
+                ringPts.push(localToCartesian(
+                    rRing * Math.cos(e2) * Math.cos(a2),
+                    rRing * Math.cos(e2) * Math.sin(a2),
+                    rRing * Math.sin(e2)));
+            }
+            var tRing = BEAMPATTERN.gainToT(gainR);
+            var cRing = BEAMPATTERN.jetColor(tRing);
+            addBeamPolyline(ringPts, "rgb(" + cRing.r + "," + cRing.g + "," + cRing.b + ")", 0.85, 1.5);
+        }
+        // 수직 축선 (패턴 중심축 표시)
+        addBeamPolyline([
+            localToCartesian(0, 0, 0),
+            localToCartesian(0, 0, scale * 1.1)
+        ], "#ffffff", 0.7, 1);
+
+        // ---- 반투명 표면 (엔진이 커스텀 Primitive 미지원 시 생략) ----
+        if (!beamSurfaceUnsupported) {
+            try {
+                var mesh = BEAMPATTERN.buildPatternMesh(scale, 15, 5);
+                var flats = [];
+                var cartesians = [];
+                for (var i = 0; i < mesh.positions.length; i++) {
+                    var lp = mesh.positions[i];
+                    var cp = localToCartesian(lp.e, lp.n, lp.u);
+                    cartesians.push(cp);
+                    flats.push(cp.x, cp.y, cp.z);
+                }
+                var indices = [];
+                for (i = 0; i < mesh.indices.length; i++) indices.push(mesh.indices[i]);
+                var geometry = new Cesium.Geometry({
+                    attributes: {
+                        position: new Cesium.GeometryAttribute({
+                            componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+                            componentsPerAttribute: 3,
+                            values: flats
+                        })
+                    },
+                    indices: indices,
+                    primitiveType: Cesium.PrimitiveType.TRIANGLES,
+                    boundingSphere: Cesium.BoundingSphere.fromPoints(cartesians)
+                });
+                var prim = new Cesium.Primitive({
+                    geometryInstances: new Cesium.GeometryInstance({
+                        geometry: geometry,
+                        attributes: {
+                            color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+                                Cesium.Color.CYAN.withAlpha(0.12))
+                        }
+                    }),
+                    appearance: new Cesium.PerInstanceColorAppearance({
+                        flat: true,
+                        translucent: true
+                    }),
+                    asynchronous: false
+                });
+                viewer.scene.primitives.add(prim);
+                beamPrimitive = prim;
+            } catch (e) {
+                beamSurfaceUnsupported = true;
+            }
+        }
+
+        beamVisible = true;
+        var btn = $("btn-beam");
+        if (btn) btn.classList.add("active");
+        var msg = "빔패턴 표시: 크기 " + scale + "m · 900MHz 옴니 (수평 최대 0dB, 천정/저중 −30dB)";
+        var tilt = getBeamTilt(), swing = getBeamSwing();
+        if (tilt) msg += " · 틸트 " + tilt + "°";
+        if (tilt || swing) msg += " · 스윙 " + swing + "°";
+        if (beamSurfaceUnsupported) msg += " · 표면 렌더링 미지원(와이어프레임만)";
+        setStatus(msg);
+    }
+
+    function clearBeam() {
+        var viewer = getViewer();
+        if (beamPrimitive && viewer) {
+            try { viewer.scene.primitives.remove(beamPrimitive); } catch (e) {}
+        }
+        if (viewer) {
+            for (var i = 0; i < beamEntities.length; i++) {
+                try { viewer.entities.remove(beamEntities[i]); } catch (e) {}
+            }
+        }
+        beamEntities = [];
+        beamPrimitive = null;
+        beamVisible = false;
+        txRefForBeam = null;
+        var btn = $("btn-beam");
+        if (btn) btn.classList.remove("active");
+    }
+
+    function toggleBeam() {
         if (!ready || !getViewer()) { setStatus("지도 준비 중...", true); return; }
-        if (predictionVisible) { clearPrediction(); setStatus("예측 구간 숨김"); return; }
+        if (!window.BEAMPATTERN) { setStatus("빔패턴 모듈(beampattern.js)을 찾을 수 없습니다.", true); return; }
+        if (beamVisible) {
+            clearBeam();
+            setStatus("빔패턴 숨김");
+            return;
+        }
+        renderBeam();
+    }
+
+    function refreshPrediction() {
         var ref = getTxRef();
         if (!ref) { setStatus("기준점을 찾을 수 없습니다.", true); return; }
         updateTxMarker();
@@ -595,6 +880,13 @@ var MAIN = (function () {
         var grid = generatePredictionGrid(calib.ref, points);
         if (!grid.length) { setStatus("예측 그리드가 비었습니다.", true); return; }
         renderPrediction(calib, grid);
+    }
+
+    function togglePrediction() {
+        if (!points.length) { setStatus("먼저 CSV를 업로드하세요.", true); return; }
+        if (!ready || !getViewer()) { setStatus("지도 준비 중...", true); return; }
+        if (predictionVisible) { clearPrediction(); setStatus("예측 구간 숨김"); return; }
+        refreshPrediction();
     }
     return { flyTo: flyTo, moveTo: moveTo };
 })();

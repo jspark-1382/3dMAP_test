@@ -16,7 +16,8 @@
       })();
     </script>
     <script type="text/javascript" src="js/csv.js"></script>
-    <script type="text/javascript" src="js/main.js"></script>
+    <script type="text/javascript" src="js/beampattern.js?v=2"></script>
+    <script type="text/javascript" src="js/main.js?v=2"></script>
 </head>
 <body>
     <div id="map"></div>
@@ -51,6 +52,25 @@
                 <span class="tx-label">격자 간격(m)</span>
             </div>
             <button id="btn-predict" class="tx-btn">📡 예측 구간 그리기</button>
+        </div>
+        <div class="beam-section">
+            <div class="section-title">📶 안테나 빔패턴 (900MHz 옴니)</div>
+            <div class="tx-row">
+                <button id="btn-beam" class="tx-btn">빔패턴 표시</button>
+                <input type="range" id="beam-scale" min="50" max="2000" step="50" value="500" />
+                <span id="beam-scale-val" class="tx-label">500m</span>
+            </div>
+            <div class="tx-row">
+                <input type="number" id="beam-tilt" value="0" min="-10" max="30" step="0.5" class="tx-inp" style="width:70px;" />
+                <span class="tx-label">틸트(°)</span>
+                <input type="number" id="beam-swing" value="0" min="0" max="360" step="1" class="tx-inp" style="width:70px;" />
+                <span class="tx-label">스윙(°)</span>
+            </div>
+            <label class="hint beam-calib-label">
+                <input type="checkbox" id="chk-beam-calib" checked />
+                측정 결과 기반 보정 (예측에 안테나 이득 반영)
+            </label>
+            <p class="hint">틸트: 다운틸트(양수) · 스윙: 틸트 기울기 방위(북=0°). 옴니는 수평 무지향이라 스윙은 틸트&gt;0일 때 방향을 정의</p>
         </div>
         <div class="meta">
             <div id="meta-count">포인트 수: 0</div>

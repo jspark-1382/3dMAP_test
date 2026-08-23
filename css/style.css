@@ -303,6 +303,49 @@ html, body {
     background: #059669;
 }
 
+/* ---- 안테나 빔패턴 ---- */
+.beam-section {
+    padding: 8px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.beam-section .tx-row {
+    flex-wrap: nowrap;
+}
+
+#btn-beam {
+    display: inline-block;
+    width: auto;
+    padding: 7px 14px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+#beam-scale {
+    flex: 1;
+    min-width: 0;
+    accent-color: #2563eb;
+}
+
+#beam-scale-val {
+    width: 44px;
+    text-align: right;
+}
+
+.beam-calib-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #6b7280;
+    cursor: pointer;
+    margin-top: 2px;
+}
+
+.beam-calib-label input {
+    accent-color: #2563eb;
+}
+
 /* ---- VWORLD/Cesium 기본 UI 숨김 (패널 겹침 방지) ---- */
 .cesium-viewer-bottom,
 .cesium-viewer-toolbar,
