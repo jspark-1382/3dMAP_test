@@ -346,6 +346,45 @@ html, body {
     accent-color: #2563eb;
 }
 
+/* ---- 고도별 예측 비교표 ---- */
+#alt-compare-result {
+    margin-top: 6px;
+    font-size: 11px;
+}
+
+.alt-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.alt-table th, .alt-table td {
+    padding: 3px 4px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.alt-table th {
+    color: #6b7280;
+    font-weight: 600;
+}
+
+.alt-chip {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.alt-note {
+    margin-top: 4px;
+    font-size: 10px;
+    color: #9ca3af;
+}
+
 /* ---- VWORLD/Cesium 기본 UI 숨김 (패널 겹침 방지) ---- */
 .cesium-viewer-bottom,
 .cesium-viewer-toolbar,

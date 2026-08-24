@@ -439,6 +439,14 @@ var MAIN = (function () {
                 if (predictionVisible && points.length) refreshPrediction();
             });
         }
+        var predAlt = $("pred-alt");
+        if (predAlt) {
+            predAlt.addEventListener("change", function () {
+                if (predictionVisible && points.length) refreshPrediction();
+            });
+        }
+        var altCompareBtn = $("btn-alt-compare");
+        if (altCompareBtn) altCompareBtn.addEventListener("click", compareAltitudes);
 
         setStatus("브이월드 3D 지도를 불러오는 중...");
     }
@@ -612,10 +620,11 @@ var MAIN = (function () {
         return grid;
     }
 
-    function renderPrediction(calib, grid) {
+    function renderPrediction(calib, grid, hEff) {
         clearPrediction();
         var viewer = getViewer();
         if (!viewer || !window.Cesium) return;
+        hEff = (hEff === undefined || hEff === null) ? (calib.ref.alt || 0) : hEff;
         // 측정 경로 폴리라인
         if (points.length > 1) {
             var pathPositions = [];
@@ -633,8 +642,8 @@ var MAIN = (function () {
             var g = grid[j];
             var predictedRSRP = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
             if (calib.useGain && calib.gainCoef && window.BEAMPATTERN) {
-                // 지상 격자점(고도 0) 기준 고도각/방위각 → 안테나 이득(틸트/스윙 반영)
-                var elDeg = Math.atan2(-(calib.ref.alt || 0), Math.max(g.d, 1)) * 180 / Math.PI;
+                // 격자점(고도 0) 기준 고도각/방위각 → 안테나 이득(틸트/스윙·시나리오 고도 반영)
+                var elDeg = Math.atan2(-hEff, Math.max(g.d, 1)) * 180 / Math.PI;
                 var azDeg = BEAMPATTERN.bearingDeg(calib.ref.lon, calib.ref.lat, g.lon, g.lat);
                 predictedRSRP += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, azDeg, getBeamTilt(), getBeamSwing());
             }
@@ -656,7 +665,18 @@ var MAIN = (function () {
         if (btn) btn.classList.add("active");
         var refStr = " RSRP_0=" + calib.rsrp0.toFixed(1) + " dBm  n=" + calib.n.toFixed(2);
         if (calib.useGain) refStr += "  이득보정 k=" + calib.gainCoef.toFixed(2);
+        if (hOverride !== null && hOverride !== undefined) refStr += "  · 예측 고도 " + hEff + "m 시나리오";
         setStatus("예측 완료: 격자 " + grid.length + "점, n=" + calib.n.toFixed(2) + refStr);
+    }
+
+    // 예측 고도 시나리오 (null = 기지국 고도 사용)
+    var hOverride = null;
+
+    function getPredAltOverride() {
+        var sel = $("pred-alt");
+        if (!sel || sel.value === "") return null;
+        var v = parseFloat(sel.value);
+        return isNaN(v) ? null : v;
     }
 
     function clearPrediction() {
@@ -879,7 +899,8 @@ var MAIN = (function () {
         var calib = calibrateModel(ref, points);
         var grid = generatePredictionGrid(calib.ref, points);
         if (!grid.length) { setStatus("예측 그리드가 비었습니다.", true); return; }
-        renderPrediction(calib, grid);
+        hOverride = getPredAltOverride();
+        renderPrediction(calib, grid, hOverride !== null ? hOverride : (calib.ref.alt || 0));
     }
 
     function togglePrediction() {
@@ -887,6 +908,62 @@ var MAIN = (function () {
         if (!ready || !getViewer()) { setStatus("지도 준비 중...", true); return; }
         if (predictionVisible) { clearPrediction(); setStatus("예측 구간 숨김"); return; }
         refreshPrediction();
+    }
+
+    // ================== 고도별 예측 비교 (100/200/300m) ==================
+    var ALT_COMPARE_LIST = [100, 200, 300];
+    var ALT_COVERAGE_THRESHOLD = -100; // dBm
+
+    function predictedAt(calib, g, hEff) {
+        var r = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
+        if (calib.useGain && calib.gainCoef && window.BEAMPATTERN) {
+            var elDeg = Math.atan2(-hEff, Math.max(g.d, 1)) * 180 / Math.PI;
+            var azDeg = BEAMPATTERN.bearingDeg(calib.ref.lon, calib.ref.lat, g.lon, g.lat);
+            r += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, azDeg, getBeamTilt(), getBeamSwing());
+        }
+        return r;
+    }
+
+    function compareAltitudes() {
+        if (!points.length) { setStatus("먼저 CSV를 업로드하세요.", true); return; }
+        if (!window.BEAMPATTERN) { setStatus("빔패턴 모듈을 찾을 수 없습니다.", true); return; }
+        var ref = getTxRef();
+        if (!ref) { setStatus("기준점을 찾을 수 없습니다.", true); return; }
+        var calib = calibrateModel(ref, points);
+        var grid = generatePredictionGrid(calib.ref, points);
+        if (!grid.length) { setStatus("예측 그리드가 비었습니다.", true); return; }
+
+        var box = $("alt-compare-result");
+        if (!box) return;
+
+        var html = '<table class="alt-table"><tr>' +
+            '<th>고도</th><th>평균 RSRP</th><th>최소</th><th>≥' + ALT_COVERAGE_THRESHOLD + 'dBm</th>' +
+            '</tr>';
+        for (var i = 0; i < ALT_COMPARE_LIST.length; i++) {
+            var alt = ALT_COMPARE_LIST[i];
+            var sum = 0, count = 0, good = 0, minV = Infinity;
+            for (var j = 0; j < grid.length; j++) {
+                var pr = predictedAt(calib, grid[j], alt);
+                sum += pr; count++;
+                if (pr >= ALT_COVERAGE_THRESHOLD) good++;
+                if (pr < minV) minV = pr;
+            }
+            var mean = sum / count;
+            var cov = Math.round(good / count * 1000) / 10;
+            html += '<tr>' +
+                '<td>' + alt + 'm</td>' +
+                '<td><span class="alt-chip" style="background:' + colorForRsrp(mean) + '"></span>' +
+                    mean.toFixed(1) + ' dBm</td>' +
+                '<td>' + minV.toFixed(1) + '</td>' +
+                '<td>' + cov + '%</td>' +
+                '</tr>';
+        }
+        html += '</table>';
+        html += '<div class="alt-note">격자 ' + grid.length + '점 · 이득보정 ' +
+            (calib.useGain ? "ON (k=" + calib.gainCoef.toFixed(2) + ")" : "OFF") +
+            ' · 틸트 ' + getBeamTilt() + '°/스윙 ' + getBeamSwing() + '°</div>';
+        box.innerHTML = html;
+        setStatus("고도별 예측 비교 완료: " + ALT_COMPARE_LIST.join("/") + "m 시나리오");
     }
     return { flyTo: flyTo, moveTo: moveTo };
 })();
