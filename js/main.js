@@ -96,9 +96,12 @@ var MAIN = (function () {
 
     function colorForRsrp(v) {
         if (v === null || v === undefined || isNaN(Number(v))) return "#9ca3af";
-        var b = Math.floor(Number(v) / 10) * 10;
-        for (var i = 0; i < rsrpBins.length; i++) {
-            if (rsrpBins[i].lo === b) return rsrpBins[i].color;
+        // 빈은 10dB 연속 구간 → 선형탐색 대신 인덱스 직접 계산
+        if (rsrpBins.length) {
+            var b = Math.floor(Number(v) / 10) * 10;
+            var idx = (b - rsrpBins[0].lo) / 10;
+            var i = Math.round(idx);
+            if (i >= 0 && i < rsrpBins.length && rsrpBins[i].lo === b) return rsrpBins[i].color;
         }
         return "#9ca3af";
     }
@@ -636,17 +639,17 @@ var MAIN = (function () {
             });
             predictionEntities.push(pathEnt);
         }
-        // 예측 점들
+        // 예측 점들 (틸트/스윙은 렌더당 1회만 읽음, 방위각은 점당 1회 사전 계산)
+        var tilt = getBeamTilt(), swing = getBeamSwing();
+        var useG = calib.useGain && calib.gainCoef && window.BEAMPATTERN;
+        if (useG) {
+            for (var jp = 0; jp < grid.length; jp++) {
+                grid[jp].az = BEAMPATTERN.bearingDeg(calib.ref.lon, calib.ref.lat, grid[jp].lon, grid[jp].lat);
+            }
+        }
         var collection = new Cesium.PointPrimitiveCollection();
         for (var j = 0; j < grid.length; j++) {
-            var g = grid[j];
-            var predictedRSRP = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
-            if (calib.useGain && calib.gainCoef && window.BEAMPATTERN) {
-                // 격자점(고도 0) 기준 고도각/방위각 → 안테나 이득(틸트/스윙·시나리오 고도 반영)
-                var elDeg = Math.atan2(-hEff, Math.max(g.d, 1)) * 180 / Math.PI;
-                var azDeg = BEAMPATTERN.bearingDeg(calib.ref.lon, calib.ref.lat, g.lon, g.lat);
-                predictedRSRP += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, azDeg, getBeamTilt(), getBeamSwing());
-            }
+            var predictedRSRP = predictedAt(calib, grid[j], hEff, tilt, swing, useG);
             var colorStr = colorForRsrp(predictedRSRP);
             var col = Cesium.Color.fromCssColorString(colorStr);
             collection.add({
@@ -720,6 +723,7 @@ var MAIN = (function () {
     var beamPrimitive = null;   // 표면 프리미티브(지원 시)
     var beamVisible = false;
     var beamSurfaceUnsupported = false;
+    var _beamTilt = 0, _beamSwing = 0;   // 렌더당 1회 읽어 캐시 (정점 루프의 DOM 접근 제거)
 
     function getBeamScale() {
         var v = parseInt($("beam-scale").value, 10);
@@ -737,8 +741,8 @@ var MAIN = (function () {
     }
 
     function localToCartesian(e, n, u) {
-        // 로컬 ENU(m) → 절대 ECEF (txRefForBeam 기준, 틸트/스윙 회전 적용)
-        var rp = BEAMPATTERN.rotateENU(e, n, u, getBeamTilt(), getBeamSwing());
+        // 로컬 ENU(m) → 절대 ECEF (txRefForBeam 기준, 캐시된 틸트/스윙으로 회전)
+        var rp = BEAMPATTERN.rotateENU(e, n, u, _beamTilt, _beamSwing);
         var p = BEAMPATTERN.enuToEcef(txRefForBeam.lon, txRefForBeam.lat, txRefForBeam.alt || 0, rp.e, rp.n, rp.u);
         return new Cesium.Cartesian3(p.x, p.y, p.z);
     }
@@ -766,36 +770,54 @@ var MAIN = (function () {
         if (!ref) { setStatus("기준점이 없습니다. CSV 업로드 또는 기지국 좌표를 입력하세요.", true); return; }
         txRefForBeam = ref;
         var scale = getBeamScale();
+        _beamTilt = getBeamTilt();
+        _beamSwing = getBeamSwing();
         updateTxMarker();
 
+        // ---- 고도각별 값 사전 계산 (방위와 무관 → 자오선/링 공용) ----
+        var elTable = [];   // i: el = -90 + 5i → {gain, r, sinE, cosE}
+        for (var i5 = 0; i5 <= 36; i5++) {
+            var elV = -90 + i5 * 5;
+            var gainV = BEAMPATTERN.gainAtElevation(elV);
+            var erad = elV * Math.PI / 180;
+            elTable.push({
+                gain: gainV,
+                r: scale * Math.pow(10, gainV / 20),
+                sinE: Math.sin(erad),
+                cosE: Math.cos(erad)
+            });
+        }
+        // 방위각 원 테이블 (링 공용, 5° 스텝 73개)
+        var azTable = [];
+        for (var a5 = 0; a5 <= 72; a5++) {
+            var aRad = a5 * 5 * Math.PI / 180;
+            azTable.push({ c: Math.cos(aRad), s: Math.sin(aRad) });
+        }
+
         // ---- 와이어프레임: 자오선(el 스캔) + 링(az 원) ----
-        for (var az = 0; az < 360; az += 15) {
+        for (var az = 0; az < 24; az++) {
+            var arad = az * 15 * Math.PI / 180;
+            var cAz = Math.cos(arad), sAz = Math.sin(arad);
             var positions = [];
-            for (var el = -90; el <= 90.0001; el += 5) {
-                var gain = BEAMPATTERN.gainAtElevation(Math.min(el, 90));
-                var amp = Math.pow(10, gain / 20);
-                var r = scale * amp;
-                var arad = az * Math.PI / 180, erad = Math.min(el, 90) * Math.PI / 180;
+            for (var ie = 0; ie <= 36; ie++) {
+                var t5 = elTable[ie];
                 positions.push(localToCartesian(
-                    r * Math.cos(erad) * Math.cos(arad),
-                    r * Math.cos(erad) * Math.sin(arad),
-                    r * Math.sin(erad)));
+                    t5.r * t5.cosE * cAz,
+                    t5.r * t5.cosE * sAz,
+                    t5.r * t5.sinE));
             }
             addBeamPolyline(positions, "#94a3b8", 0.6, 1.5);
         }
-        for (el = -80; el <= 80.001; el += 10) {
+        for (var ir = 2; ir <= 34; ir += 2) {   // el = -80..80 step 10 (elTable 짝수 인덱스)
+            var tR = elTable[ir];
             var ringPts = [];
-            var gainR = BEAMPATTERN.gainAtElevation(el);
-            var ampR = Math.pow(10, gainR / 20);
-            var rRing = scale * ampR;
-            for (az = 0; az <= 360.001; az += 5) {
-                var a2 = az * Math.PI / 180, e2 = el * Math.PI / 180;
+            for (var ia = 0; ia <= 72; ia++) {
                 ringPts.push(localToCartesian(
-                    rRing * Math.cos(e2) * Math.cos(a2),
-                    rRing * Math.cos(e2) * Math.sin(a2),
-                    rRing * Math.sin(e2)));
+                    tR.r * tR.cosE * azTable[ia].c,
+                    tR.r * tR.cosE * azTable[ia].s,
+                    tR.r * tR.sinE));
             }
-            var tRing = BEAMPATTERN.gainToT(gainR);
+            var tRing = BEAMPATTERN.gainToT(tR.gain);
             var cRing = BEAMPATTERN.jetColor(tRing);
             addBeamPolyline(ringPts, "rgb(" + cRing.r + "," + cRing.g + "," + cRing.b + ")", 0.85, 1.5);
         }
@@ -914,12 +936,12 @@ var MAIN = (function () {
     var ALT_COMPARE_LIST = [100, 200, 300];
     var ALT_COVERAGE_THRESHOLD = -100; // dBm
 
-    function predictedAt(calib, g, hEff) {
+    // 격자점 1점의 예측 RSRP (tilt/swing/useG는 호출자가 캐시해 전달 — 루프 내 DOM 읽기 방지)
+    function predictedAt(calib, g, hEff, tilt, swing, useG) {
         var r = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
-        if (calib.useGain && calib.gainCoef && window.BEAMPATTERN) {
+        if (useG) {
             var elDeg = Math.atan2(-hEff, Math.max(g.d, 1)) * 180 / Math.PI;
-            var azDeg = BEAMPATTERN.bearingDeg(calib.ref.lon, calib.ref.lat, g.lon, g.lat);
-            r += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, azDeg, getBeamTilt(), getBeamSwing());
+            r += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, g.az, tilt, swing);
         }
         return r;
     }
@@ -933,6 +955,15 @@ var MAIN = (function () {
         var grid = generatePredictionGrid(calib.ref, points);
         if (!grid.length) { setStatus("예측 그리드가 비었습니다.", true); return; }
 
+        // 격자점별 불변값(방위각)은 1회만 계산 — 고도와 무관
+        var tilt = getBeamTilt(), swing = getBeamSwing();
+        var useG = calib.useGain && calib.gainCoef && window.BEAMPATTERN;
+        if (useG) {
+            for (var j = 0; j < grid.length; j++) {
+                grid[j].az = BEAMPATTERN.bearingDeg(ref.lon, ref.lat, grid[j].lon, grid[j].lat);
+            }
+        }
+
         var box = $("alt-compare-result");
         if (!box) return;
 
@@ -942,8 +973,8 @@ var MAIN = (function () {
         for (var i = 0; i < ALT_COMPARE_LIST.length; i++) {
             var alt = ALT_COMPARE_LIST[i];
             var sum = 0, count = 0, good = 0, minV = Infinity;
-            for (var j = 0; j < grid.length; j++) {
-                var pr = predictedAt(calib, grid[j], alt);
+            for (j = 0; j < grid.length; j++) {
+                var pr = predictedAt(calib, grid[j], alt, tilt, swing, useG);
                 sum += pr; count++;
                 if (pr >= ALT_COVERAGE_THRESHOLD) good++;
                 if (pr < minV) minV = pr;
@@ -961,7 +992,7 @@ var MAIN = (function () {
         html += '</table>';
         html += '<div class="alt-note">격자 ' + grid.length + '점 · 이득보정 ' +
             (calib.useGain ? "ON (k=" + calib.gainCoef.toFixed(2) + ")" : "OFF") +
-            ' · 틸트 ' + getBeamTilt() + '°/스윙 ' + getBeamSwing() + '°</div>';
+            ' · 틸트 ' + tilt + '°/스윙 ' + swing + '°</div>';
         box.innerHTML = html;
         setStatus("고도별 예측 비교 완료: " + ALT_COMPARE_LIST.join("/") + "m 시나리오");
     }

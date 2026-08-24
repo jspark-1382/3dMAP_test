@@ -189,28 +189,40 @@ var BEAMPATTERN = (function () {
         for (az = 0; az < 360; az += azStepDeg) azs.push(az);
         for (el = -90; el <= 90.0001; el += elStepDeg) els.push(Math.min(el, 90));
 
+        // 고도각별 값은 방위와 무관 → 1회만 계산 (az 루프에서 재사용)
+        var nEl = els.length;
+        var elGain = new Array(nEl), elAmp = new Array(nEl);
+        var elSin = new Array(nEl), elCos = new Array(nEl);
+        for (var ie0 = 0; ie0 < nEl; ie0++) {
+            el = els[ie0];
+            var g0 = gainAtElevation(el);
+            elGain[ie0] = g0;
+            elAmp[ie0] = scaleMeters * Math.pow(10, g0 / 20);   // 진폭 비례 반경
+            var er0 = toRad(el);
+            elSin[ie0] = Math.sin(er0);
+            elCos[ie0] = Math.cos(er0);
+        }
+
         var positions = [];  // {e,n,u,gainDb}
         var idxMap = {};     // "azIndex:elIndex" → vertex index
         var k = 0;
         for (var ia = 0; ia < azs.length; ia++) {
-            for (var ie = 0; ie < els.length; ie++) {
-                el = els[ie];
-                var gain = gainAtElevation(el);
-                var amp = Math.pow(10, gain / 20);           // 진폭 비례
-                var r = scaleMeters * amp;
-                var arad = toRad(azs[ia]), erad = toRad(el);
-                var pe = r * Math.cos(erad) * Math.cos(arad);
-                var pn = r * Math.cos(erad) * Math.sin(arad);
-                var pu = r * Math.sin(erad);
+            var arad = toRad(azs[ia]);
+            var cAz = Math.cos(arad), sAz = Math.sin(arad);
+            for (var ie = 0; ie < nEl; ie++) {
+                var r = elAmp[ie];
+                var pe = r * elCos[ie] * cAz;
+                var pn = r * elCos[ie] * sAz;
+                var pu = r * elSin[ie];
                 var rp = rotateENU(pe, pn, pu, tiltDeg || 0, swingDeg || 0);
                 positions.push({
                     e: rp.e, n: rp.n, u: rp.u,
-                    gainDb: gain
+                    gainDb: elGain[ie]
                 });
                 idxMap[ia + ":" + ie] = k++;
             }
         }
-        var nAz = azs.length, nEl = els.length;
+        var nAz = azs.length;
         var indices = [];
         for (ia = 0; ia < nAz; ia++) {
             var ia2 = (ia + 1) % nAz;
