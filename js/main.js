@@ -414,7 +414,9 @@ var MAIN = (function () {
         });
 
         $("btn-tx-apply").addEventListener("click", function () { setTxFromInput(); updateTxMarker(); });
-        $("btn-predict").addEventListener("click", togglePrediction);
+        $("btn-predict").addEventListener("click", drawPredictions);
+        var predHide = $("btn-predict-hide");
+        if (predHide) predHide.addEventListener("click", hidePrediction);
 
         var beamBtn = $("btn-beam");
         if (beamBtn) beamBtn.addEventListener("click", toggleBeam);
@@ -623,11 +625,11 @@ var MAIN = (function () {
         return grid;
     }
 
-    function renderPrediction(calib, grid, hEff) {
+    function renderPrediction(calib, grid, hTerm) {
         clearPrediction();
         var viewer = getViewer();
         if (!viewer || !window.Cesium) return;
-        hEff = (hEff === undefined || hEff === null) ? (calib.ref.alt || 0) : hEff;
+        hTerm = (hTerm === undefined || hTerm === null) ? 0 : hTerm;
         // 측정 경로 폴리라인
         if (points.length > 1) {
             var pathPositions = [];
@@ -649,11 +651,12 @@ var MAIN = (function () {
         }
         var collection = new Cesium.PointPrimitiveCollection();
         for (var j = 0; j < grid.length; j++) {
-            var predictedRSRP = predictedAt(calib, grid[j], hEff, tilt, swing, useG);
+            var g = grid[j];
+            var predictedRSRP = predictedAt(calib, g, hTerm, tilt, swing, useG);
             var colorStr = colorForRsrp(predictedRSRP);
             var col = Cesium.Color.fromCssColorString(colorStr);
             collection.add({
-                position: Cesium.Cartesian3.fromDegrees(g.lon, g.lat, 0),
+                position: Cesium.Cartesian3.fromDegrees(g.lon, g.lat, hTerm),
                 color: col,
                 pixelSize: 6,
                 outlineColor: Cesium.Color.WHITE.withAlpha(0.05),
@@ -668,18 +671,16 @@ var MAIN = (function () {
         if (btn) btn.classList.add("active");
         var refStr = " RSRP_0=" + calib.rsrp0.toFixed(1) + " dBm  n=" + calib.n.toFixed(2);
         if (calib.useGain) refStr += "  이득보정 k=" + calib.gainCoef.toFixed(2);
-        if (hOverride !== null && hOverride !== undefined) refStr += "  · 예측 고도 " + hEff + "m 시나리오";
+        refStr += "  · 단말 고도 " + hTerm + "m 커버리지";
         setStatus("예측 완료: 격자 " + grid.length + "점, n=" + calib.n.toFixed(2) + refStr);
     }
 
-    // 예측 고도 시나리오 (null = 기지국 고도 사용)
-    var hOverride = null;
-
-    function getPredAltOverride() {
+    // 단말(수신) 고도 시나리오 (m) — 커버리지 평면 높이
+    function getTerminalAlt() {
         var sel = $("pred-alt");
-        if (!sel || sel.value === "") return null;
+        if (!sel) return 0;
         var v = parseFloat(sel.value);
-        return isNaN(v) ? null : v;
+        return isNaN(v) ? 0 : v;
     }
 
     function clearPrediction() {
@@ -921,15 +922,20 @@ var MAIN = (function () {
         var calib = calibrateModel(ref, points);
         var grid = generatePredictionGrid(calib.ref, points);
         if (!grid.length) { setStatus("예측 그리드가 비었습니다.", true); return; }
-        hOverride = getPredAltOverride();
-        renderPrediction(calib, grid, hOverride !== null ? hOverride : (calib.ref.alt || 0));
+        renderPrediction(calib, grid, getTerminalAlt());
     }
 
-    function togglePrediction() {
+    // 그리기 버튼: 항상 (다시) 그림 — 토글 아님. 숨김은 별도 버튼
+    function drawPredictions() {
         if (!points.length) { setStatus("먼저 CSV를 업로드하세요.", true); return; }
         if (!ready || !getViewer()) { setStatus("지도 준비 중...", true); return; }
-        if (predictionVisible) { clearPrediction(); setStatus("예측 구간 숨김"); return; }
         refreshPrediction();
+    }
+
+    function hidePrediction() {
+        if (!predictionVisible) { setStatus("숨길 예측 구간이 없습니다."); return; }
+        clearPrediction();
+        setStatus("예측 구간 숨김");
     }
 
     // ================== 고도별 예측 비교 (100/200/300m) ==================
@@ -937,10 +943,11 @@ var MAIN = (function () {
     var ALT_COVERAGE_THRESHOLD = -100; // dBm
 
     // 격자점 1점의 예측 RSRP (tilt/swing/useG는 호출자가 캐시해 전달 — 루프 내 DOM 읽기 방지)
-    function predictedAt(calib, g, hEff, tilt, swing, useG) {
+    // hTerm: 단말(수신) 고도(m) — 고도각 = atan2(hTerm − 기지국고도, 수평거리)
+    function predictedAt(calib, g, hTerm, tilt, swing, useG) {
         var r = calib.rsrp0 - 10 * calib.n * Math.log10(g.d > 1 ? g.d : 1);
         if (useG) {
-            var elDeg = Math.atan2(-hEff, Math.max(g.d, 1)) * 180 / Math.PI;
+            var elDeg = Math.atan2(hTerm - (calib.ref.alt || 0), Math.max(g.d, 1)) * 180 / Math.PI;
             r += calib.gainCoef * BEAMPATTERN.tiltedGain(elDeg, g.az, tilt, swing);
         }
         return r;
@@ -968,7 +975,7 @@ var MAIN = (function () {
         if (!box) return;
 
         var html = '<table class="alt-table"><tr>' +
-            '<th>고도</th><th>평균 RSRP</th><th>최소</th><th>≥' + ALT_COVERAGE_THRESHOLD + 'dBm</th>' +
+            '<th>단말 고도</th><th>평균 RSRP</th><th>최소</th><th>≥' + ALT_COVERAGE_THRESHOLD + 'dBm</th>' +
             '</tr>';
         for (var i = 0; i < ALT_COMPARE_LIST.length; i++) {
             var alt = ALT_COMPARE_LIST[i];
@@ -994,7 +1001,7 @@ var MAIN = (function () {
             (calib.useGain ? "ON (k=" + calib.gainCoef.toFixed(2) + ")" : "OFF") +
             ' · 틸트 ' + tilt + '°/스윙 ' + swing + '°</div>';
         box.innerHTML = html;
-        setStatus("고도별 예측 비교 완료: " + ALT_COMPARE_LIST.join("/") + "m 시나리오");
+        setStatus("단말 고도별 커버리지 비교 완료: " + ALT_COMPARE_LIST.join("/") + "m");
     }
     return { flyTo: flyTo, moveTo: moveTo };
 })();

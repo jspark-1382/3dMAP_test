@@ -16,8 +16,8 @@
       })();
     </script>
     <script type="text/javascript" src="js/csv.js"></script>
-    <script type="text/javascript" src="js/beampattern.js?v=4"></script>
-    <script type="text/javascript" src="js/main.js?v=4"></script>
+    <script type="text/javascript" src="js/beampattern.js?v=5"></script>
+    <script type="text/javascript" src="js/main.js?v=5"></script>
 </head>
 <body>
     <div id="map"></div>
@@ -51,18 +51,22 @@
                 <input type="text" id="pred-spacing" value="50" class="tx-inp" style="width:80px;" />
                 <span class="tx-label">격자 간격(m)</span>
             </div>
-            <button id="btn-predict" class="tx-btn">📡 예측 구간 그리기</button>
+            <div class="tx-row">
+                <button id="btn-predict" class="tx-btn">📡 예측 구간 그리기</button>
+                <button id="btn-predict-hide" class="tx-btn" style="width:auto; padding:7px 12px; background:#6b7280;">숨김</button>
+            </div>
             <div class="tx-row" style="margin-top:6px;">
-                <span class="tx-label">예측 고도</span>
+                <span class="tx-label">단말 고도</span>
                 <select id="pred-alt" class="tx-inp" style="flex:1; width:auto;">
-                    <option value="">기지국 고도 사용</option>
+                    <option value="0">0m (지면)</option>
                     <option value="100">100m</option>
                     <option value="200">200m</option>
                     <option value="300">300m</option>
                 </select>
             </div>
-            <button id="btn-alt-compare" class="tx-btn">📊 고도별 예측 비교 (100/200/300m)</button>
+            <button id="btn-alt-compare" class="tx-btn">📊 단말 고도별 커버리지 비교 (100/200/300m)</button>
             <div id="alt-compare-result"></div>
+            <p class="hint">단말(수신) 고도 시나리오 — 커버리지를 해당 고도 평면에 그립니다</p>
         </div>
         <div class="beam-section">
             <div class="section-title">📶 안테나 빔패턴 (900MHz 옴니)</div>
