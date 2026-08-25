@@ -444,6 +444,38 @@ var MAIN = (function () {
                 if (predictionVisible && points.length) refreshPrediction();
             });
         }
+        // ---- Sionna RT 예측 기반 빔패턴 체크박스 / 고도 선택 ----
+        var sionnaChk = $("chk-beam-sionna");
+        if (sionnaChk) {
+            sionnaChk.addEventListener("change", function () {
+                var row = $("beam-sionna-alt-row");
+                if (row) row.style.display = sionnaChk.checked ? "flex" : "none";
+                if (!sionnaChk.checked) {
+                    if (beamVisible) { clearBeam(); renderBeam(); }   // 측정 패턴으로 복귀
+                    return;
+                }
+                if (window.SIONNA && !SIONNA.hasData()) {
+                    setStatus("Sionna RT 예측 결과를 로드하는 중...");
+                    ensureBeamSionnaData(function (err, d) {
+                        if (err || !d) {
+                            setStatus("Sionna 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음"), true);
+                            return;
+                        }
+                        populateBeamSionnaAlts(d);
+                        if (beamVisible) { clearBeam(); renderBeam(); }
+                    });
+                } else if (window.SIONNA && SIONNA.hasData()) {
+                    SIONNA.ensureData(function (_e, d2) { populateBeamSionnaAlts(d2); });
+                    if (beamVisible) { clearBeam(); renderBeam(); }
+                }
+            });
+        }
+        var beamSionnaAlt = $("beam-sionna-alt");
+        if (beamSionnaAlt) {
+            beamSionnaAlt.addEventListener("change", function () {
+                if (beamVisible) { clearBeam(); renderBeam(); }
+            });
+        }
         var predAlt = $("pred-alt");
         if (predAlt) {
             predAlt.addEventListener("change", function () {
@@ -451,7 +483,9 @@ var MAIN = (function () {
             });
         }
         var altCompareBtn = $("btn-alt-compare");
-        if (altCompareBtn) altCompareBtn.addEventListener("click", compareAltitudes);
+
+
+        prefillDefaultBs();   // 기본 기지국(config.js의 DEFAULT_BS) 입력란 자동 채움        if (altCompareBtn) altCompareBtn.addEventListener("click", compareAltitudes);
 
         setStatus("브이월드 3D 지도를 불러오는 중...");
     }
@@ -468,6 +502,19 @@ var MAIN = (function () {
     var predictionVisible = false;
     var txEntity = null;
 
+// 기본 기지국 좌표를 입력란에 미리 채워 표시 (매번 입력하지 않도록)
+function prefillDefaultBs() {
+    if (typeof DEFAULT_BS === "undefined" || !DEFAULT_BS) return;
+    var lon = Number(DEFAULT_BS.longitude), lat = Number(DEFAULT_BS.latitude);
+    if (isNaN(lon) || isNaN(lat)) return;
+    var alt = (typeof DEFAULT_BS.altitude === "number" && !isNaN(DEFAULT_BS.altitude))
+              ? DEFAULT_BS.altitude : 0;
+    var lonInp = $("tx-lon"), latInp = $("tx-lat"), altInp = $("tx-alt");
+    if (lonInp && !lonInp.value) lonInp.value = String(lon);
+    if (latInp && !latInp.value) latInp.value = String(lat);
+    if (altInp && !altInp.value) altInp.value = String(alt);
+}
+
     function setTxFromInput() {
         var lon = parseFloat($("tx-lon").value);
         var lat = parseFloat($("tx-lat").value);
@@ -478,8 +525,8 @@ var MAIN = (function () {
     }
 
     function getTxRef() {
-        if (txRef) return txRef;
-        if (!points.length) return null;
+    if (txRef) return txRef;
+    if (!points.length) return null;
         var best = points[0], maxR = -999;
         for (var i = 0; i < points.length; i++) {
             var r = Number(points[i].rsrp);
@@ -741,6 +788,37 @@ var MAIN = (function () {
         return isNaN(v) ? 0 : v;
     }
 
+    // ---- Sionna RT 예측 기반 패턴 모드 ----
+    function isBeamSionnaChecked() {
+        var c = $("chk-beam-sionna");
+        return !!(c && c.checked);
+    }
+
+    function ensureBeamSionnaData(cb) {
+        if (!window.SIONNA || !SIONNA.ensureData) {
+            cb(new Error("sionna.js 모듈을 찾을 수 없습니다."), null);
+            return;
+        }
+        SIONNA.ensureData(cb);
+    }
+
+    function populateBeamSionnaAlts(d) {
+        var sel = $("beam-sionna-alt");
+        if (!sel || !d || !d.meta) return;
+        sel.innerHTML = "";
+        var optAll = document.createElement("option");
+        optAll.value = "all";
+        optAll.textContent = "전체 고도 통합";
+        sel.appendChild(optAll);
+        var alts = d.meta.altitudesM || [];
+        for (var i = 0; i < alts.length; i++) {
+            var o = document.createElement("option");
+            o.value = String(alts[i]);
+            o.textContent = alts[i] + "m";
+            sel.appendChild(o);
+        }
+    }
+
     function localToCartesian(e, n, u) {
         // 로컬 ENU(m) → 절대 ECEF (txRefForBeam 기준, 캐시된 틸트/스윙으로 회전)
         var rp = BEAMPATTERN.rotateENU(e, n, u, _beamTilt, _beamSwing);
@@ -775,18 +853,33 @@ var MAIN = (function () {
         _beamSwing = getBeamSwing();
         updateTxMarker();
 
-        // ---- 고도각별 값 사전 계산 (방위와 무관 → 자오선/링 공용) ----
-        var elTable = [];   // i: el = -90 + 5i → {gain, r, sinE, cosE}
+        // ---- 이득 소스 선택: Sionna RT 예측 기반 또는 측정 옴니 패턴 ----
+        var sionnaPat = null, gainFn = null, azDependent = false;
+        if (isBeamSionnaChecked() && window.SIONNA && SIONNA.hasData()) {
+            var selAlt = $("beam-sionna-alt");
+            sionnaPat = SIONNA.getPattern(selAlt ? selAlt.value : "all");
+            if (sionnaPat) {
+                gainFn = SIONNA.makeGainFn(sionnaPat);
+                azDependent = true;
+                _beamTilt = 0;   // RT 예측은 세계좌표 기준 → 틸트/스윙 중복 적용 방지
+                _beamSwing = 0;
+            }
+        }
+        if (!gainFn) {
+            gainFn = function (_az, el) { return BEAMPATTERN.gainAtElevation(el); };
+        }
+
+        // 방위각/고도각별 반경 계산 헬퍼 (진폭 비례)
+        function rAt(azDeg, elDeg) {
+            var g = gainFn(azDeg, elDeg);
+            return { g: g, r: scale * Math.pow(10, g / 20) };
+        }
+
+        // ---- 고도각 테이블 (자오선 공용) ----
+        var elTable = [];   // i: el = -90 + 5i → {sinE, cosE}
         for (var i5 = 0; i5 <= 36; i5++) {
-            var elV = -90 + i5 * 5;
-            var gainV = BEAMPATTERN.gainAtElevation(elV);
-            var erad = elV * Math.PI / 180;
-            elTable.push({
-                gain: gainV,
-                r: scale * Math.pow(10, gainV / 20),
-                sinE: Math.sin(erad),
-                cosE: Math.cos(erad)
-            });
+            var erad = (-90 + i5 * 5) * Math.PI / 180;
+            elTable.push({ sinE: Math.sin(erad), cosE: Math.cos(erad) });
         }
         // 방위각 원 테이블 (링 공용, 5° 스텝 73개)
         var azTable = [];
@@ -796,31 +889,55 @@ var MAIN = (function () {
         }
 
         // ---- 와이어프레임: 자오선(el 스캔) + 링(az 원) ----
-        for (var az = 0; az < 24; az++) {
-            var arad = az * 15 * Math.PI / 180;
+        for (var azm = 0; azm < 24; azm++) {
+            var meridAz = azm * 15;
+            var arad = meridAz * Math.PI / 180;
             var cAz = Math.cos(arad), sAz = Math.sin(arad);
             var positions = [];
             for (var ie = 0; ie <= 36; ie++) {
-                var t5 = elTable[ie];
+                var t5 = rAt(meridAz, -90 + ie * 5);
                 positions.push(localToCartesian(
-                    t5.r * t5.cosE * cAz,
-                    t5.r * t5.cosE * sAz,
-                    t5.r * t5.sinE));
+                    t5.r * elTable[ie].cosE * cAz,
+                    t5.r * elTable[ie].cosE * sAz,
+                    t5.r * elTable[ie].sinE));
             }
             addBeamPolyline(positions, "#94a3b8", 0.6, 1.5);
         }
-        for (var ir = 2; ir <= 34; ir += 2) {   // el = -80..80 step 10 (elTable 짝수 인덱스)
-            var tR = elTable[ir];
-            var ringPts = [];
-            for (var ia = 0; ia <= 72; ia++) {
-                ringPts.push(localToCartesian(
-                    tR.r * tR.cosE * azTable[ia].c,
-                    tR.r * tR.cosE * azTable[ia].s,
-                    tR.r * tR.sinE));
+        for (var ir = 2; ir <= 34; ir += 2) {   // el = -80..80 step 10
+            var elV = -90 + ir * 5;
+            var eIdx = ir;
+            if (azDependent) {
+                // RT 예측(방위 의존): 링을 30° 세그먼트로 나눠 각각 이득에 맞는 색 적용
+                for (var seg = 0; seg < 12; seg++) {
+                    var aStart = seg * 6;   // 시작 스텝(1스텝=5°): 세그먼트 30° = 6스텝
+                    var ringPts = [];
+                    for (var s2 = 0; s2 <= 6; s2++) {
+                        var aIdx = aStart + s2;      // azTable 인덱스 (최대 72)
+                        var tS = rAt(aIdx * 5, elV);
+                        ringPts.push(localToCartesian(
+                            tS.r * elTable[eIdx].cosE * azTable[aIdx].c,
+                            tS.r * elTable[eIdx].cosE * azTable[aIdx].s,
+                            tS.r * elTable[eIdx].sinE));
+                    }
+                    var midG = rAt(aStart * 5 + 15, elV).g;   // 세그먼트 중앙 방위
+                    var cMid = BEAMPATTERN.jetColor(BEAMPATTERN.gainToT(midG));
+                    addBeamPolyline(ringPts,
+                        "rgb(" + cMid.r + "," + cMid.g + "," + cMid.b + ")", 0.85, 1.5);
+                }
+            } else {
+                // 측정 옴니(방위 무관): 기존 방식 — 링 전체 단일 색
+                var tR = rAt(0, elV);
+                var ringPts2 = [];
+                for (var ia = 0; ia <= 72; ia++) {
+                    ringPts2.push(localToCartesian(
+                        tR.r * elTable[eIdx].cosE * azTable[ia].c,
+                        tR.r * elTable[eIdx].cosE * azTable[ia].s,
+                        tR.r * elTable[eIdx].sinE));
+                }
+                var tRing = BEAMPATTERN.gainToT(tR.g);
+                var cRing = BEAMPATTERN.jetColor(tRing);
+                addBeamPolyline(ringPts2, "rgb(" + cRing.r + "," + cRing.g + "," + cRing.b + ")", 0.85, 1.5);
             }
-            var tRing = BEAMPATTERN.gainToT(tR.gain);
-            var cRing = BEAMPATTERN.jetColor(tRing);
-            addBeamPolyline(ringPts, "rgb(" + cRing.r + "," + cRing.g + "," + cRing.b + ")", 0.85, 1.5);
         }
         // 수직 축선 (패턴 중심축 표시)
         addBeamPolyline([
@@ -831,7 +948,9 @@ var MAIN = (function () {
         // ---- 반투명 표면 (엔진이 커스텀 Primitive 미지원 시 생략) ----
         if (!beamSurfaceUnsupported) {
             try {
-                var mesh = BEAMPATTERN.buildPatternMesh(scale, 15, 5);
+                var mesh = azDependent
+                    ? BEAMPATTERN.buildPatternMeshFromGain(gainFn, scale, 15, 5)
+                    : BEAMPATTERN.buildPatternMesh(scale, 15, 5);
                 var flats = [];
                 var cartesians = [];
                 for (var i = 0; i < mesh.positions.length; i++) {
@@ -878,10 +997,20 @@ var MAIN = (function () {
         beamVisible = true;
         var btn = $("btn-beam");
         if (btn) btn.classList.add("active");
-        var msg = "빔패턴 표시: 크기 " + scale + "m · 900MHz 옴니 (수평 최대 0dB, 천정/저중 −30dB)";
-        var tilt = getBeamTilt(), swing = getBeamSwing();
-        if (tilt) msg += " · 틸트 " + tilt + "°";
-        if (tilt || swing) msg += " · 스윙 " + swing + "°";
+        var msg;
+        if (sionnaPat) {
+            msg = "빔패턴 표시 [Sionna RT 예측 기반]: 크기 " + scale + "m · 고도 " +
+                  sionnaPat.altitudes.join("/") + "m (" + sionnaPat.sampleCount +
+                  "점 · 예측범위 " + sionnaPat.sourceMinDbm + "~" + sionnaPat.sourceMaxDbm + "dBm)";
+        } else {
+            msg = "빔패턴 표시: 크기 " + scale + "m · 900MHz 옴니 (수평 최대 0dB, 천정/저중 −30dB)";
+            var tilt = getBeamTilt(), swing = getBeamSwing();
+            if (tilt) msg += " · 틸트 " + tilt + "°";
+            if (tilt || swing) msg += " · 스윙 " + swing + "°";
+        }
+        if (isBeamSionnaChecked() && window.SIONNA && SIONNA.hasData() && !sionnaPat) {
+            msg += " · Sionna 패턴 추출 실패(측정 패턴으로 표시)";
+        }
         if (beamSurfaceUnsupported) msg += " · 표면 렌더링 미지원(와이어프레임만)";
         setStatus(msg);
     }
@@ -910,6 +1039,20 @@ var MAIN = (function () {
         if (beamVisible) {
             clearBeam();
             setStatus("빔패턴 숨김");
+            return;
+        }
+        // Sionna 예측 기반 모드인데 결과 미로드 시: 먼저 로드 후 렌더
+        if (isBeamSionnaChecked() && window.SIONNA && !SIONNA.hasData()) {
+            setStatus("Sionna RT 예측 결과를 로드하는 중...");
+            ensureBeamSionnaData(function (err, d) {
+                if (err || !d) {
+                    setStatus("Sionna 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음") +
+                              " — 측정 패턴으로 표시하려면 체크를 해제하세요.", true);
+                    return;
+                }
+                populateBeamSionnaAlts(d);
+                if (!beamVisible) renderBeam();
+            });
             return;
         }
         renderBeam();

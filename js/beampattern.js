@@ -180,29 +180,16 @@ var BEAMPATTERN = (function () {
         return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     }
 
-    // 도넛 메시 생성 (로컬 ENU 미터 좌표, 틸트/스윙 회전 적용)
-    // azStep/elStep: 분할 간격(deg), scaleMeters: 최대 반경
-    // 메시는 안테나 프레임에서 생성 후 틸트/스윙 회전 적용
-    function buildPatternMesh(scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg) {
+    // 범용 패턴 메시 생성: gainFn(azDeg, elDeg) → dB 를 받아 3D 반투명 표면 메시 생성
+    //   - 측정 옴니 패턴뿐 아니라 Sionna RT 예측 기반(방위 의존) 패턴에도 사용
+    //   - 반환: { positions:[{e,n,u,gainDb}], indices } (로컬 ENU 미터, 틸트/스윙 회전 적용)
+    function buildPatternMeshFromGain(gainFn, scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg) {
         var azs = [], els = [];
         var az, el;
         for (az = 0; az < 360; az += azStepDeg) azs.push(az);
         for (el = -90; el <= 90.0001; el += elStepDeg) els.push(Math.min(el, 90));
 
-        // 고도각별 값은 방위와 무관 → 1회만 계산 (az 루프에서 재사용)
         var nEl = els.length;
-        var elGain = new Array(nEl), elAmp = new Array(nEl);
-        var elSin = new Array(nEl), elCos = new Array(nEl);
-        for (var ie0 = 0; ie0 < nEl; ie0++) {
-            el = els[ie0];
-            var g0 = gainAtElevation(el);
-            elGain[ie0] = g0;
-            elAmp[ie0] = scaleMeters * Math.pow(10, g0 / 20);   // 진폭 비례 반경
-            var er0 = toRad(el);
-            elSin[ie0] = Math.sin(er0);
-            elCos[ie0] = Math.cos(er0);
-        }
-
         var positions = [];  // {e,n,u,gainDb}
         var idxMap = {};     // "azIndex:elIndex" → vertex index
         var k = 0;
@@ -210,14 +197,17 @@ var BEAMPATTERN = (function () {
             var arad = toRad(azs[ia]);
             var cAz = Math.cos(arad), sAz = Math.sin(arad);
             for (var ie = 0; ie < nEl; ie++) {
-                var r = elAmp[ie];
-                var pe = r * elCos[ie] * cAz;
-                var pn = r * elCos[ie] * sAz;
-                var pu = r * elSin[ie];
+                el = els[ie];
+                var g = gainFn(azs[ia], el);
+                var r = scaleMeters * Math.pow(10, g / 20);   // 진폭 비례 반경
+                var er = toRad(el);
+                var pe = r * Math.cos(er) * cAz;
+                var pn = r * Math.cos(er) * sAz;
+                var pu = r * Math.sin(er);
                 var rp = rotateENU(pe, pn, pu, tiltDeg || 0, swingDeg || 0);
                 positions.push({
                     e: rp.e, n: rp.n, u: rp.u,
-                    gainDb: elGain[ie]
+                    gainDb: g
                 });
                 idxMap[ia + ":" + ie] = k++;
             }
@@ -235,6 +225,16 @@ var BEAMPATTERN = (function () {
         return { positions: positions, indices: indices };
     }
 
+    // 도넛 메시 생성 (로컬 ENU 미터 좌표, 틸트/스윙 회전 적용)
+    // azStep/elStep: 분할 간격(deg), scaleMeters: 최대 반경
+    // 메시는 안테나 프레임에서 생성 후 틸트/스윙 회전 적용
+    // (수직면 전용이므로 방위 무관 → buildPatternMeshFromGain 위임)
+    function buildPatternMesh(scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg) {
+        return buildPatternMeshFromGain(
+            function (_az, el) { return gainAtElevation(el); },
+            scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg);
+    }
+
     return {
         BEAM_TABLE: BEAM_TABLE,
         GAIN_MIN: GAIN_MIN,
@@ -247,7 +247,8 @@ var BEAMPATTERN = (function () {
         rotateENU: rotateENU,
         tiltedGain: tiltedGain,
         bearingDeg: bearingDeg,
-        buildPatternMesh: buildPatternMesh
+        buildPatternMesh: buildPatternMesh,
+        buildPatternMeshFromGain: buildPatternMeshFromGain
     };
 })();
 

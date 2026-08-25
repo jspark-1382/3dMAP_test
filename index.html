@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>브이월드 3D 지도 - CSV 좌표 이동</title>
     <link rel="stylesheet" href="css/style.css" />
-    <script type="text/javascript" src="js/config.js"></script>
+    <script type="text/javascript" src="js/config.js?v=2"></script>
     <script type="text/javascript">
       (function () {
         var domain = (typeof VWORLD_DOMAIN !== 'undefined' && VWORLD_DOMAIN) ? VWORLD_DOMAIN : location.host;
@@ -16,8 +16,74 @@
       })();
     </script>
     <script type="text/javascript" src="js/csv.js"></script>
-    <script type="text/javascript" src="js/beampattern.js?v=5"></script>
-    <script type="text/javascript" src="js/main.js?v=5"></script>
+    <script type="text/javascript" src="js/beampattern.js?v=6"></script>
+    <script type="text/javascript" src="js/main.js?v=8"></script>
+    <script type="text/javascript" src="js/sionna.js?v=11"></script>
+    <style>
+        /* ---- Sionna 커버리지 범례 (왼쪽 하단) ---- */
+        #sionna-legend {
+            position: absolute;
+            left: 12px;
+            bottom: 64px;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.94);
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            padding: 8px 12px;
+            font-size: 12px;
+            display: none;
+        }
+        #sionna-legend .sl-title {
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #111827;
+        }
+        #sionna-legend .sl-row {
+            display: flex;
+            align-items: center;
+            margin-top: 4px;
+            color: #111827;
+            white-space: nowrap;
+        }
+        #sionna-legend .sl-swatch {
+            display: inline-block;
+            width: 16px; height: 16px;
+            border-radius: 4px;
+            margin-right: 8px;
+            flex: 0 0 auto;
+        }
+        #sionna-legend .sl-bs {
+            margin-top: 6px;
+            padding-top: 5px;
+            border-top: 1px dashed #d1d5db;
+            color: #374151;
+        }
+        #sionna-legend .sl-dot {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #facc15;
+            border: 1px solid #a16207;
+            vertical-align: -1px;
+            margin-right: 4px;
+        }
+        /* ---- 오른쪽 패널 전체 스크롤 ---- */
+        #panel {
+            overflow-y: auto;
+        }
+        #panel::-webkit-scrollbar { width: 8px; }
+        #panel::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        #panel::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        #panel::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        /* 포인트 목록은 패널 안에서 고정 높이 + 내부 스크롤 유지 */
+        .list-wrap {
+            flex: 0 0 auto;
+            max-height: 280px;
+        }
+    </style>
+
+
+
 </head>
 <body>
     <div id="map"></div>
@@ -37,11 +103,11 @@
         <div class="tx-section">
             <div class="section-title">📡 기지국 (송신원)</div>
             <div class="tx-row">
-                <input type="text" id="tx-lon" placeholder="경도" class="tx-inp" />
-                <input type="text" id="tx-lat" placeholder="위도" class="tx-inp" />
+                <input type="text" id="tx-lon" placeholder="경도" value="127.2059722" class="tx-inp" />
+                <input type="text" id="tx-lat" placeholder="위도" value="34.6126944" class="tx-inp" />
             </div>
             <div class="tx-row">
-                <input type="text" id="tx-alt" placeholder="고도(m, 선택)" class="tx-inp" />
+                <input type="text" id="tx-alt" placeholder="고도(m, 선택)" value="16" class="tx-inp" />
 </div>
             <button id="btn-tx-apply" class="tx-btn">기지국 설정</button>
         </div>
@@ -68,6 +134,51 @@
             <div id="alt-compare-result"></div>
             <p class="hint">단말(수신) 고도 시나리오 — 커버리지를 해당 고도 평면에 그립니다</p>
         </div>
+        <div class="pred-section">
+            <div class="section-title">🛰️ Sionna RT 예측 (측정 패턴 기반)</div>
+            <div class="tx-row">
+                <button id="btn-sionna-load" class="tx-btn">📡 Sionna 결과 로드</button>
+                <button id="btn-sionna-hide" class="tx-btn" style="width:auto; padding:7px 12px; background:#6b7280;">숨김</button>
+            </div>
+            <div class="tx-row" style="margin-top:6px;">
+                <span class="tx-label">단말 고도</span>
+                <select id="sionna-alt" class="tx-inp" style="flex:1; width:auto;"></select>
+            </div>
+            <div class="tx-row" style="margin-top:6px;">
+                <span class="tx-label">표시 모드</span>
+                <select id="sionna-mode" class="tx-inp" style="flex:1; width:auto;">
+                    <option value="full">전체 반경 (기지국 중심)</option>
+                    <option value="corridor">방향별 일직선</option>
+                </select>
+            </div>
+            <div id="sionna-corridor-ctrl" style="display:none; margin-top:6px; padding:8px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb;">
+                <div class="tx-row">
+                    <span class="tx-label">방위각</span>
+                    <input id="sionna-az" type="number" class="tx-inp" value="0" min="0" max="360" step="5" style="width:70px;">
+                    <span class="tx-label">° (북=0°, 시계방향)</span>
+                </div>
+                <div class="tx-row" style="margin-top:4px; gap:4px;">
+                    <button id="az-n" class="tx-btn" style="width:auto; padding:4px 8px; font-size:11px;">북 0°</button>
+                    <button id="az-e" class="tx-btn" style="width:auto; padding:4px 8px; font-size:11px;">동 90°</button>
+                    <button id="az-s" class="tx-btn" style="width:auto; padding:4px 8px; font-size:11px;">남 180°</button>
+                    <button id="az-w" class="tx-btn" style="width:auto; padding:4px 8px; font-size:11px;">서 270°</button>
+                </div>
+                <div class="tx-row" style="margin-top:4px;">
+                    <span class="tx-label">코리도 반폭</span>
+                    <input id="sionna-width" type="number" class="tx-inp" value="50" min="10" step="10" style="width:70px;">
+                    <span class="tx-label">m (±)</span>
+                </div>
+                <div class="tx-row" style="margin-top:4px;">
+                    <span class="tx-label">동시 표시 고도</span>
+                    <input id="sionna-alts" type="text" class="tx-inp" value="100,200,500,2000" style="flex:1; width:auto;">
+                </div>
+                <button id="btn-sionna-corridor" class="tx-btn" style="margin-top:6px;">➤ 방향별 표시 적용</button>
+                <p class="hint">기지국에서 지정 방위각으로 일직선 코리도(빨간 점선)를 그리고, 각 고도를 동시에 표시합니다</p>
+            </div>
+            <div id="sionna-result"></div>
+            <p class="hint">python/run_coverage.py 실행 결과(Data/sionna/)를 표시합니다</p>
+        </div>
+
         <div class="beam-section">
             <div class="section-title">📶 안테나 빔패턴 (900MHz 옴니)</div>
             <div class="tx-row">
@@ -82,10 +193,18 @@
                 <span class="tx-label">스윙(°)</span>
             </div>
             <label class="hint beam-calib-label">
+                <input type="checkbox" id="chk-beam-sionna" />
+                Sionna RT 예측 기반 패턴 사용 (방위별 비대칭)
+            </label>
+            <div class="tx-row" id="beam-sionna-alt-row" style="display:none;">
+                <span class="tx-label">예측 고도</span>
+                <select id="beam-sionna-alt" class="tx-inp" style="flex:1; width:auto;"></select>
+            </div>
+            <label class="hint beam-calib-label">
                 <input type="checkbox" id="chk-beam-calib" checked />
                 측정 결과 기반 보정 (예측에 안테나 이득 반영)
             </label>
-            <p class="hint">틸트: 다운틸트(양수) · 스윙: 틸트 기울기 방위(북=0°). 옴니는 수평 무지향이라 스윙은 틸트&gt;0일 때 방향을 정의</p>
+            <p class="hint">틸트: 다운틸트(양수) · 스윙: 틸트 기울기 방위(북=0°). 옴니는 수평 무지향이라 스윙은 틸트&gt;0일 때 방향을 정의. RT 예측 모드에서는 틸트/스윙이 적용되지 않습니다</p>
         </div>
         <div class="meta">
             <div id="meta-count">포인트 수: 0</div>
@@ -107,6 +226,7 @@
         </div>
     </div>
 
+    <div id="sionna-legend"></div>
     <div id="legend"></div>
     <div id="measure-result" style="display:none"></div>
     <div id="status" class="status">브이월드 3D 지도를 불러오는 중...</div>

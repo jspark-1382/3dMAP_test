@@ -3,3 +3,9 @@ js/config.js
 
 # AI 도구 상태/세션 파일
 .omo/
+
+# Sionna 가상환경 및 실행 로그
+.venv-sionna/
+sionna_*.log
+__pycache__/
+

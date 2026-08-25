@@ -15,3 +15,11 @@ var DEFAULT_VIEW = {
     latitude: 36.0,
     altitude: 300000
 };
+
+// 기본 기지국 (송신원) - 34°36'45.7"N 127°12'21.5"E, 안테나 설치고도 16m
+// python/sionna_config.py 의 BS_LAT_DMS/BS_LON_DMS/BS_ALT_M 과 동일 값
+var DEFAULT_BS = {
+    longitude: 127.2059722,   // 127°12'21.5"E
+    latitude: 34.6126944,     // 34°36'45.7"N
+    altitude: 16.0            // m
+};

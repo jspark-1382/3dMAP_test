@@ -180,5 +180,34 @@ test("buildPatternMesh: 틸트 적용 시 천정 정점이 기울어짐", functi
     assert.ok(Math.abs(pt.u - 500 * 0.0316 * Math.cos(t)) < 0.1, "u=" + pt.u);
 });
 
+// ---------- buildPatternMeshFromGain ----------
+test("buildPatternMeshFromGain: 방위 무관 함수 → buildPatternMesh와 동일 결과", function () {
+    var m1 = BP.buildPatternMesh(500, 15, 5);
+    var m2 = BP.buildPatternMeshFromGain(function (_az, el) { return BP.gainAtElevation(el); }, 500, 15, 5);
+    assert.strictEqual(m2.positions.length, m1.positions.length);
+    for (var i = 0; i < m1.positions.length; i++) {
+        var a = m1.positions[i], b = m2.positions[i];
+        if (Math.abs(a.e - b.e) > 1e-9 || Math.abs(a.n - b.n) > 1e-9 ||
+            Math.abs(a.u - b.u) > 1e-9 || a.gainDb !== b.gainDb) {
+            throw new Error("정점 " + i + " 불일치");
+        }
+    }
+});
+test("buildPatternMeshFromGain: 방위 의존 함수가 반경에 반영됨", function () {
+    // 동쪽(az=90)만 0dB, 나머지 -20dB 인 방위 의존 패턴
+    function g(az) { return (Math.abs(az - 90) < 1e-9) ? 0 : -20; }
+    var mesh = BP.buildPatternMeshFromGain(function (az, _el) { return g(az); }, 500, 15, 5);
+    var idxEastH = 6 * 37 + 18;    // az=90, el=0
+    var idxWestH = 18 * 37 + 18;   // az=270, el=0
+    var pe = mesh.positions[idxEastH];
+    var pw = mesh.positions[idxWestH];
+    var re = Math.sqrt(pe.e * pe.e + pe.n * pe.n + pe.u * pe.u);
+    var rw = Math.sqrt(pw.e * pw.e + pw.n * pw.n + pw.u * pw.u);
+    assert.ok(Math.abs(re - 500) < 0.01, "동쪽 반경=" + re);
+    assert.ok(Math.abs(rw - 500 * Math.pow(10, -1)) < 0.5, "서쪽 반경=" + rw);
+    assert.strictEqual(pe.gainDb, 0);
+    assert.strictEqual(pw.gainDb, -20);
+});
+
 console.log("\n" + passed + " passed, " + failed + " failed");
 if (failed > 0) process.exit(1);

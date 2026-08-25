@@ -51,6 +51,9 @@ Idx, CID_1, Time, [LTE][L1][RF]PCI, [LTE][L1][RF]RSRP (dBm)(dBm), [General][GPS]
 - [x] 각 좌표로 카메라 이동(`camera.flyTo`) + 마커 표시
 - [x] 좌표 목록 클릭 이동 / 첫·이전·다음·마지막·홈 버튼
 - [x] 원본/보정 고도, 시간, RSRP 부가정보 표시
+- [x] 안테나 빔패턴 3D 반투명 표시 — 측정 옴니 패턴 또는
+  **Sionna RT 예측 기반 패턴**(체크박스 선택, `Data/sionna/sionna_coverage.json`의
+  격자점을 방위각×고도각 5° 빈으로 집계해 최대 0dB 정규화)
 
 ## 파일 구조
 
@@ -62,7 +65,30 @@ js/csv.js             # CSV 파서
 js/main.js            # VWORLD 3D(webglMapInit) + 지도 + CSV 연동
 sample/drone_data.csv # 테스트용 CSV
 test/test_csv.js      # CSV 파서 Node 검증
+js/sionna.js          # Sionna RT 커버리지 표시 모듈
+python/run_coverage.py # Sionna RT 예측 실행 스크립트 (python/ 폴더 참고)
 ```
+
+## Sionna RT 커버리지 예측 (선택)
+
+측정 안테나 패턴(`Data/pattern/OM900_pattern_1.csv`, 910MHz)을 적용해
+기지국(34°36'45.7"N 127°12'21.5"E) 주변의 수신 전력을 레이트레이싱으로 예측하고,
+단말 고도 100~500m 구간별 커버리지를 지도 위에 표시합니다.
+
+```bash
+# 최초 1회: Python 3.11 가상환경에 Sionna 설치 (시스템 기본 python 버전과 무관)
+py -3.11 -m venv .venv-sionna
+.venv-sionna\Scripts\pip install sionna
+
+# 시뮬레이션 실행 (--quick: 저해상도 빠른 검증)
+.venv-sionna\Scripts\python python\run_coverage.py
+
+# 서버 실행 후 브라우저에서 "Sionna RT 예측" 섹션의 [Sionna 결과 로드] 클릭
+python -m http.server 8000
+```
+
+- 기지국 좌표·안테나 고도·TX 전력·격자 해상도 등은 `python/sionna_config.py`에서 수정
+- 결과는 `Data/sionna/sionna_coverage.json`으로 저장되며 `js/sionna.js`가 로드
 
 ## 주의
 
