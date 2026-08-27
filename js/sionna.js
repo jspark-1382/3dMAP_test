@@ -8,66 +8,46 @@
 var SIONNA = (function () {
     "use strict";
 
-    var DATA_URL = "Data/sionna/sionna_coverage.json";
+    var DATA_SOURCES = {
+        reflected: {
+            url: "Data/sionna/sionna_coverage.json",
+            label: "평탄 지면 (직접파 + 지면 반사)"
+        },
+        freeSpace: {
+            url: "Data/sionna/sionna_free_space.json",
+            label: "자유공간 (Sionna 직접파만)"
+        },
+        formula: {
+            url: "Data/sionna/formula_pathloss.json",
+            label: "자유공간 (Friis 수식 · Sionna 미사용)"
+        }
+    };
 
     var data = null;            // 로드된 JSON
+    var dataBySource = {};       // 환경별 JSON 캐시
+    var currentSource = "reflected";
     var collections = {};       // altStr -> Cesium.PointPrimitiveCollection
     var currentAlt = null;      // 화면에 표시 중인 고도
     var loading = false;
+    var comparisonSets = null;
     var txMarker = null;        // 기지국 확인용 마커 엔티티
-
-
-    // RSRP 색상: 기존 RF 범례와 동일한 10dB 단위 이산 색상 (초록=강함 → 빨강=약함)
-    var SIONNA_BINS = [
-        { lo: -100, hi: -90, hue: 0,   light: 50 },   // 빨강
-        { lo: -90,  hi: -80, hue: 30,  light: 50 },   // 주황
-        { lo: -80,  hi: -70, hue: 60,  light: 50 },   // 노랑
-        { lo: -70,  hi: -60, hue: 90,  light: 50 },   // 연두
-        { lo: -60,  hi: -50, hue: 120, light: 50 },   // 초록
-        { lo: -50,  hi: -40, hue: 120, light: 62 }    // 밝은 초록 (최강)
-    ];
-
-    function binForDbm(v) {
-        if (v >= SIONNA_BINS[SIONNA_BINS.length - 1].lo) {
-            return SIONNA_BINS[SIONNA_BINS.length - 1];   // -50 이상 → 최강
-        }
-        for (var i = 0; i < SIONNA_BINS.length; i++) {
-            if (v >= SIONNA_BINS[i].lo && v < SIONNA_BINS[i].hi) return SIONNA_BINS[i];
-        }
-        return SIONNA_BINS[0];                            // -100 미만 → 최약(빨강)
-    }
+    var displayBaseHeightM = null; // VWorld terrain의 기지국 지표 높이
+    var terrainHeightLoading = false;
+    var TERRAIN_BASE_FALLBACK_M = 0.0;
 
     function $(id) { return document.getElementById(id); }
 
-    // dBm → 0..1 정규화 (0=최강, 1=최약, 범위 백 클램프) — 하위 호환 유지
+
     function dbmToT(v) {
-        var strong = -40, weak = -100;
-        var t = (strong - v) / (strong - weak);
-        return Math.max(0, Math.min(1, t));
+        return (typeof RF_COLOR !== "undefined") ? RF_COLOR.dbmToT(v) : 0;
     }
 
-    // RSRP → 이산 bin 색상 (10dB 단위, 기존 RF 범례와 동일 팔레트)
     function colorForDbm(v) {
-        var b = binForDbm(v);
-        return "hsl(" + b.hue + ",78%," + b.light + "%)";
+        return (typeof RF_COLOR !== "undefined") ? RF_COLOR.colorForDbm(v) : "#9ca3af";
     }
 
-    // Cesium Color [r,g,b] 생성용 (colorForDbm과 동일 색상, 0..1 반환)
     function dbmToRgb01(v) {
-        var b = binForDbm(v);
-        var h = b.hue / 360;
-        var s = 0.78, l = b.light / 100;
-        var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        var p = 2 * l - q;
-        function hue2rgb(pp, qq, hh) {
-            if (hh < 0) hh += 1;
-            if (hh > 1) hh -= 1;
-            if (hh < 1 / 6) return pp + (qq - pp) * 6 * hh;
-            if (hh < 1 / 2) return qq;
-            if (hh < 2 / 3) return pp + (qq - pp) * (2 / 3 - hh) * 6;
-            return pp;
-        }
-        return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)];
+        return (typeof RF_COLOR !== "undefined") ? RF_COLOR.rgb01(v) : [0.61, 0.64, 0.69];
     }
 
     // 격자점 [[lat,lon,dBm],...] 통계 (threshold 이상 비율 = 커버리지 %)
@@ -104,6 +84,61 @@ var SIONNA = (function () {
         return out;
     }
 
+    // 동일 고도의 두 환경 통계를 나란히 비교한다.
+    function compareDatasets(reflected, freeSpace) {
+        var out = [];
+        if (!reflected || !freeSpace || !reflected.meta || !freeSpace.meta) return out;
+        var alts = reflected.meta.altitudesM || [];
+        for (var i = 0; i < alts.length; i++) {
+            var key = String(alts[i]);
+            var rg = reflected.grids && reflected.grids[key];
+            var fg = freeSpace.grids && freeSpace.grids[key];
+            if (!rg || !fg || !rg.stats || !fg.stats) continue;
+            var deltas = [];
+            var groundStronger = 0, freeStronger = 0, equal = 0;
+            var pointCount = Math.min(
+                rg.points ? rg.points.length : 0,
+                fg.points ? fg.points.length : 0
+            );
+            for (var p = 0; p < pointCount; p++) {
+                var rp = rg.points[p], fp = fg.points[p];
+                if (!rp || !fp || rp[0] !== fp[0] || rp[1] !== fp[1]) continue;
+                var delta = Number(rp[2]) - Number(fp[2]);
+                if (!isFinite(delta)) continue;
+                deltas.push(delta);
+                if (delta > 0.05) groundStronger++;
+                else if (delta < -0.05) freeStronger++;
+                else equal++;
+            }
+            deltas.sort(function (a, b) { return a - b; });
+            var median = NaN, minDelta = NaN, maxDelta = NaN;
+            if (deltas.length) {
+                var mid = Math.floor(deltas.length / 2);
+                median = deltas.length % 2 ? deltas[mid] : (deltas[mid - 1] + deltas[mid]) / 2;
+                minDelta = deltas[0];
+                maxDelta = deltas[deltas.length - 1];
+            }
+            out.push({
+                alt: alts[i],
+                reflected: rg.stats,
+                freeSpace: fg.stats,
+                meanDeltaDb: rg.stats.meanDbm - fg.stats.meanDbm,
+                medianDeltaDb: median,
+                minDeltaDb: minDelta,
+                maxDeltaDb: maxDelta,
+                pointCount: deltas.length,
+                groundStrongerPct: deltas.length ? groundStronger / deltas.length * 100 : 0,
+                freeStrongerPct: deltas.length ? freeStronger / deltas.length * 100 : 0,
+                equalPct: deltas.length ? equal / deltas.length * 100 : 0
+            });
+        }
+        return out;
+    }
+
+    function sourceInfo(key) {
+        return DATA_SOURCES[key] || DATA_SOURCES.reflected;
+    }
+
     // ================== 방향별(코리도) 계산 ==================
 
     // 위경도 → 기지국 기준 ENU 오프셋(m) [동쪽+, 북쪽+]
@@ -138,27 +173,14 @@ var SIONNA = (function () {
         return (window.ws3d && window.ws3d.viewer) ? window.ws3d.viewer : null;
     }
 
-    // ---- 범례 (왼쪽 하단, 기존 RF 범례와 동일한 10단위 격자 형태) ----
+    // ---- 모든 RF 레이어가 공유하는 통합 RSRP 범례 ----
     function showLegend() {
-        var el = $("sionna-legend");
-        if (!el) return;
-        var html = '<div class="sl-title">Sionna RSRP 범례 (dBm · 10단위)</div>';
-        for (var i = SIONNA_BINS.length - 1; i >= 0; i--) {
-            var b = SIONNA_BINS[i];
-            var c = colorForDbm(b.lo);
-            html += '<div class="sl-row">' +
-                    '<span class="sl-swatch" style="background:' + c + '"></span>' +
-                    b.lo + ' 이상 ~ ' + b.hi + ' 미만' +
-                    '</div>';
-        }
-        html += '<div class="sl-bs"><span class="sl-dot"></span>기지국 (측정 패턴 · RT 예측)</div>';
-        el.innerHTML = html;
-        el.style.display = "block";
+        var el = $("legend");
+        if (el && typeof RF_COLOR !== "undefined") RF_COLOR.renderLegend(el);
     }
 
     function hideLegend() {
-        var el = $("sionna-legend");
-        if (el) el.style.display = "none";
+        // 공통 범례는 다른 RF 레이어에서도 사용하므로 숨기지 않는다.
     }
 
     function setStatus(msg, isError) {
@@ -196,6 +218,38 @@ var SIONNA = (function () {
         centerline = null;
     }
 
+    function resolveBaseTerrainHeight(cb) {
+        if (displayBaseHeightM !== null) { cb(displayBaseHeightM); return; }
+        if (terrainHeightLoading) { setTimeout(function(){ resolveBaseTerrainHeight(cb); }, 100); return; }
+        terrainHeightLoading = true;
+        var viewer = getViewer();
+        var bs = data && data.meta && data.meta.bs;
+        function done(h) {
+            displayBaseHeightM = isFinite(h) ? Number(h) : TERRAIN_BASE_FALLBACK_M;
+            terrainHeightLoading = false;
+            cb(displayBaseHeightM);
+        }
+        if (!viewer || !window.Cesium || !bs) { done(TERRAIN_BASE_FALLBACK_M); return; }
+        try {
+            var carto = Cesium.Cartographic.fromDegrees(bs.lon, bs.lat);
+            if (Cesium.sampleTerrainMostDetailed && viewer.terrainProvider) {
+                Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [carto]).then(function (r) {
+                    done(r && r[0] && isFinite(r[0].height) ? r[0].height : TERRAIN_BASE_FALLBACK_M);
+                }).catch(function () {
+                    try { done(viewer.scene.globe.getHeight(carto)); } catch (e2) { done(TERRAIN_BASE_FALLBACK_M); }
+                });
+            } else {
+                done(viewer.scene.globe.getHeight(carto));
+            }
+        } catch (e) { done(TERRAIN_BASE_FALLBACK_M); }
+    }
+
+    function displayHeightForAlt(altStr) {
+        return (displayBaseHeightM || 0) + parseFloat(altStr);
+    }
+
+    // 실제 cellSizeM x cellSizeM 공간 셀을 RectangleGeometry로 그린다.
+    // pixelSize 기반 PointPrimitive를 사용하지 않으므로 줌 레벨에 따라 셀 크기가 변하지 않는다.
     function buildCollection(altStr, ptsOverride) {
         var viewer = getViewer();
         if (!viewer || !window.Cesium || !data) {
@@ -204,24 +258,37 @@ var SIONNA = (function () {
         }
         var g = data.grids[altStr];
         var pts = ptsOverride || (g && g.points);
-        if (!pts || !pts.length) {
-            setStatus("고도 " + altStr + "m 데이터가 비어 있습니다.", true);
-            return null;
-        }
-        var col = new Cesium.PointPrimitiveCollection();
+        if (!pts || !pts.length) { setStatus("고도 " + altStr + "m 데이터가 비어 있습니다.", true); return null; }
+
+        var cellM = Number(data.meta.cellSizeM) || 20;
+        var half = cellM / 2.0;
+        var height = displayHeightForAlt(altStr);
+        var instances = new Array(pts.length);
         for (var i = 0; i < pts.length; i++) {
-            var c = dbmToRgb01(pts[i][2]);
-            col.add({
-                position: Cesium.Cartesian3.fromDegrees(pts[i][1], pts[i][0],
-                                                        parseFloat(altStr)),
-                pixelSize: 9,
-                color: new Cesium.Color(c[0], c[1], c[2], 0.95),
-                // 지형/건물에 가려지지 않고 항상 위에 그림 (구릉지대 커버리지 확인용)
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            var lat = Number(pts[i][0]), lon = Number(pts[i][1]), dbm = Number(pts[i][2]);
+            var dLat = half / 111320.0;
+            var cosLat = Math.cos(lat * Math.PI / 180.0);
+            var dLon = half / (111320.0 * Math.max(0.01, Math.abs(cosLat)));
+            var c = dbmToRgb01(dbm);
+            instances[i] = new Cesium.GeometryInstance({
+                geometry: new Cesium.RectangleGeometry({
+                    rectangle: Cesium.Rectangle.fromDegrees(lon-dLon, lat-dLat, lon+dLon, lat+dLat),
+                    height: height,
+                    vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT
+                }),
+                attributes: {
+                    color: Cesium.ColorGeometryInstanceAttribute.fromColor(new Cesium.Color(c[0],c[1],c[2],0.78))
+                }
             });
         }
-        viewer.scene.primitives.add(col);
-        return col;
+        var primitive = new Cesium.Primitive({
+            geometryInstances: instances,
+            appearance: new Cesium.PerInstanceColorAppearance({ translucent: true, flat: true, closed: false }),
+            asynchronous: true
+        });
+        // depth test는 Cesium 기본값을 그대로 사용: 지형 뒤의 셀은 지형에 가려진다.
+        viewer.scene.primitives.add(primitive);
+        return primitive;
     }
 
     // 지도(viewer) 로딩 완료를 기다렸다가 콜백 실행 (최대 60초)
@@ -266,7 +333,7 @@ var SIONNA = (function () {
                 txMarker = viewer.entities.add({
                     position: Cesium.Cartesian3.fromDegrees(data.meta.bs.lon,
                                                             data.meta.bs.lat,
-                                                            data.meta.antennaHeightM || 30),
+                                                            (displayBaseHeightM || 0) + (data.meta.antennaHeightM || 30)),
                     point: {
                         pixelSize: 18,
                         color: Cesium.Color.YELLOW,
@@ -293,6 +360,10 @@ var SIONNA = (function () {
         }
         collections = {};
 
+        if (displayBaseHeightM === null) {
+            resolveBaseTerrainHeight(function () { showAltitude(altStr); });
+            return;
+        }
         var col = buildCollection(altStr);
         if (!col) return;
         collections[altStr] = col;
@@ -300,8 +371,9 @@ var SIONNA = (function () {
         ensureTxMarker();
         flyToPoints(data.grids[altStr].points);
 
-        setStatus("Sionna 예측 표시 [전체 반경]: 단말 고도 " + altStr + "m (" +
-                  data.grids[altStr].points.length + "점)");
+        setStatus(sourceInfo(currentSource).label + " 표시 [전체 반경]: 단말 고도 " + altStr + "m / 기준 지표 " +
+                  displayBaseHeightM.toFixed(1) + "m / 실제 셀 " + data.meta.cellSizeM + "m (" +
+                  data.grids[altStr].points.length + "셀)");
     }
 
     // 모드 2: 방향별 일직선 — 지정 방위각 코리도 + 여러 고도 동시 표시
@@ -320,6 +392,10 @@ var SIONNA = (function () {
             .filter(function (s) { return s.length > 0 && data.grids[s]; });
         if (!altList.length) {
             setStatus("표시할 고도가 없습니다. (예: 100,200,500,2000)", true);
+            return;
+        }
+        if (displayBaseHeightM === null) {
+            resolveBaseTerrainHeight(function () { showCorridor(); });
             return;
         }
 
@@ -361,7 +437,7 @@ var SIONNA = (function () {
                 var dLat = (maxAlong * Math.cos(azRad)) / 111320;
                 var dLon = (maxAlong * Math.sin(azRad)) /
                            (111320 * Math.cos(bs.lat * Math.PI / 180));
-                var h = data.meta.antennaHeightM || 30;
+                var h = (displayBaseHeightM || 0) + (data.meta.antennaHeightM || 30);
                 centerline = viewer.entities.add({
                     polyline: {
                         positions: Cesium.Cartesian3.fromDegreesArrayHeights([
@@ -378,7 +454,7 @@ var SIONNA = (function () {
         } catch (e) { console.error("[SIONNA] centerline", e); }
 
         flyToPoints(allPts);
-        setStatus("Sionna 예측 표시 [방향별 " + az + "°]: " + summary.join(" · "));
+        setStatus(sourceInfo(currentSource).label + " 표시 [방향별 " + az + "°]: " + summary.join(" · "));
     }
 
     // ================== 빔패턴 추출 (Sionna RT 예측 기반) ==================
@@ -402,9 +478,46 @@ var SIONNA = (function () {
         return (typeof h === "number" && !isNaN(h)) ? h : 0;
     }
 
+    // 단일 고도 격자점을 (방위각 × 고도각) 빈에 누적 — extractPattern 헬퍼
+    function binOneAltitude(dataObj, bs, bsAlt, altKey) {
+        var sum = [], cnt = [];
+        for (var i = 0; i < PAT_N_AZ * PAT_N_EL; i++) { sum.push(0); cnt.push(0); }
+        var grid = dataObj.grids[String(altKey)];
+        var pts = grid && grid.points;
+        var used = 0, mn = Infinity, mx = -Infinity;
+        if (pts) {
+            for (var p = 0; p < pts.length; p++) {
+                var lat = pts[p][0], lon = pts[p][1], dbm = pts[p][2];
+                if (typeof dbm !== "number" || isNaN(dbm)) continue;
+                var en = enuOffsetM(bs.lat, bs.lon, lat, lon);
+                var horiz = Math.sqrt(en[0] * en[0] + en[1] * en[1]);
+                var el = Math.atan2(parseFloat(altKey) - bsAlt, Math.max(horiz, 0.001)) * 180 / Math.PI;
+                el = Math.max(-90, Math.min(90, el));
+                var az = Math.atan2(en[0], en[1]) * 180 / Math.PI;   // 북=0, 시계방향
+                var ia = Math.floor(binAzDeg(az) / PAT_AZ_STEP) % PAT_N_AZ;
+                var ie = Math.round((el + 90) / PAT_EL_STEP);
+                if (ie < 0) ie = 0;
+                if (ie > PAT_N_EL - 1) ie = PAT_N_EL - 1;
+                var bIdx = ia * PAT_N_EL + ie;
+                sum[bIdx] += dbm; cnt[bIdx]++;
+                used++;
+                if (dbm < mn) mn = dbm;
+                if (dbm > mx) mx = dbm;
+            }
+        }
+        return { sum: sum, cnt: cnt, used: used, srcMin: mn, srcMax: mx };
+    }
+
     // dataObj: sionna_coverage.json 파싱 결과
     // altList: 사용할 단말 고도 목록(m). null/빈 배열이면 전체 고도 통합
-    function extractPattern(dataObj, altList) {
+    // opts: { fill: true(기본)=결측 빈 보간 채움(기존 동작) | false=결측 NaN(구멍 처리)
+    //         norm: "per"(기본)=선택 고도 최대 기준 | "global"=전체 고도 공통 최대 기준 }
+    //   · 단말 고도 평면은 기하학적으로 샘플 가능한 고도각 범위가 제한됨
+    //     (예: 2000m 평면 + 5km 그리드 → 고도각 29°~90°만 샘플). fill=false면
+    //     이 결측 영역을 임의로 채우지 않고 NaN으로 남겨 렌더링에서 제외한다.
+    function extractPattern(dataObj, altList, opts) {
+        var fill = !(opts && opts.fill === false);
+        var norm = (opts && opts.norm === "global") ? "global" : "per";
         if (!dataObj || !dataObj.meta || !dataObj.meta.bs || !dataObj.grids) return null;
         var bs = dataObj.meta.bs;
         var bsAlt = dataMetaAlt(dataObj);
@@ -422,33 +535,20 @@ var SIONNA = (function () {
         }
         if (!use.length) return null;
 
-        // 빈별 합/개수 누적
+        // 빈별 합/개수 누적 (고도별로 계산 후 합산)
         var sum = [], cnt = [];
         for (i = 0; i < PAT_N_AZ * PAT_N_EL; i++) { sum.push(0); cnt.push(0); }
 
         var srcMin = Infinity, srcMax = -Infinity, used = 0;
         for (var g2 = 0; g2 < use.length; g2++) {
-            var grid = dataObj.grids[use[g2]];
-            var pts = grid && grid.points;
-            if (!pts) continue;
-            used += pts.length;
-            for (var p = 0; p < pts.length; p++) {
-                var lat = pts[p][0], lon = pts[p][1], dbm = pts[p][2];
-                if (typeof dbm !== "number" || isNaN(dbm)) continue;
-                var en = enuOffsetM(bs.lat, bs.lon, lat, lon);
-                var horiz = Math.sqrt(en[0] * en[0] + en[1] * en[1]);
-                var el = Math.atan2(parseFloat(use[g2]) - bsAlt, Math.max(horiz, 0.001)) * 180 / Math.PI;
-                el = Math.max(-90, Math.min(90, el));
-                var az = Math.atan2(en[0], en[1]) * 180 / Math.PI;   // 북=0, 시계방향
-                var ia = Math.floor(binAzDeg(az) / PAT_AZ_STEP) % PAT_N_AZ;
-                var ie = Math.round((el + 90) / PAT_EL_STEP);
-                if (ie < 0) ie = 0;
-                if (ie > PAT_N_EL - 1) ie = PAT_N_EL - 1;
-                var bIdx = ia * PAT_N_EL + ie;
-                sum[bIdx] += dbm; cnt[bIdx]++;
-                if (dbm < srcMin) srcMin = dbm;
-                if (dbm > srcMax) srcMax = dbm;
+            var binned = binOneAltitude(dataObj, bs, bsAlt, use[g2]);
+            for (var b3 = 0; b3 < sum.length; b3++) {
+                sum[b3] += binned.sum[b3];
+                cnt[b3] += binned.cnt[b3];
             }
+            used += binned.used;
+            if (binned.srcMin < srcMin) srcMin = binned.srcMin;
+            if (binned.srcMax > srcMax) srcMax = binned.srcMax;
         }
         if (!used || srcMin === Infinity) return null;
 
@@ -469,18 +569,50 @@ var SIONNA = (function () {
         }
         if (!isFinite(maxMean)) return null;
 
-        for (ia2 = 0; ia2 < PAT_N_AZ; ia2++) {
-            var rowG = [];
-            for (ie2 = 0; ie2 < PAT_N_EL; ie2++) {
-                var m2 = meanDbm[ia2][ie2];
-                rowG.push(isNaN(m2) ? NaN : Math.max(m2 - maxMean, -60));
+        // 정규화 기준: "per"=선택 고도 내 최대(기존), "global"=전체 고도 통합 최대
+        var refDbm = maxMean;
+        if (norm === "global") {
+            var gMax = -Infinity;
+            for (i = 0; i < allAlts.length; i++) {
+                if (!dataObj.grids[String(allAlts[i])]) continue;
+                var bg = binOneAltitude(dataObj, bs, bsAlt, String(allAlts[i]));
+                for (var b4 = 0; b4 < bg.cnt.length; b4++) {
+                    if (bg.cnt[b4]) {
+                        var m4 = bg.sum[b4] / bg.cnt[b4];
+                        if (m4 > gMax) gMax = m4;
+                    }
+                }
             }
-            gain.push(rowG);
+            if (isFinite(gMax)) refDbm = Math.max(refDbm, gMax);
         }
 
-        // 결측 빈 채우기: 같은 방위 열에서 가장 가까운 유효 고도빈 값,
+        // 마스크(실측 빈) + 상대 이득. fill=false면 결측 빈을 NaN으로 남겨
+        // 렌더링 시 구멍(면 제외) 처리된다.
+        var mask = [];
+        for (ia2 = 0; ia2 < PAT_N_AZ; ia2++) {
+            var rowG = [], rowMask = [];
+            for (ie2 = 0; ie2 < PAT_N_EL; ie2++) {
+                var b5 = ia2 * PAT_N_EL + ie2;
+                var has = cnt[b5] > 0;
+                rowMask.push(has);
+                rowG.push(has ? Math.max(meanDbm[ia2][ie2] - refDbm, -60) : NaN);
+            }
+            gain.push(rowG);
+            mask.push(rowMask);
+        }
+
+        // 동일 각도 빈의 절대 RSRP(dBm). 빔의 형상은 gain, 색상은 dbm을 사용한다.
+        var dbm = [];
+        for (ia2 = 0; ia2 < PAT_N_AZ; ia2++) {
+            dbm.push(meanDbm[ia2].slice(0));
+        }
+
+        // 결측 빈 채우기(옵션): 같은 방위 열에서 가장 가까운 유효 고도빈 값,
         // 열 전체가 비면 인접 방위 열 복사 (상한 클램프)
-        fillMissing(gain);
+        if (fill) {
+            fillMissing(gain);
+            fillMissingDbm(dbm, srcMin);
+        }
 
         return {
             azStep: PAT_AZ_STEP,
@@ -488,6 +620,11 @@ var SIONNA = (function () {
             nAz: PAT_N_AZ,
             nEl: PAT_N_EL,
             gain: gain,
+            dbm: dbm,
+            mask: mask,
+            fill: fill,
+            norm: norm,
+            normRefDbm: refDbm,
             sampleCount: used,
             altitudes: use.map(Number),
             sourceMinDbm: srcMin,
@@ -529,9 +666,21 @@ var SIONNA = (function () {
         }
     }
 
-    // 패턴 테이블 → 이득 조회 함수(방위각 래핑 + 이중선형 보간)
-    function makeGainFn(pat) {
-        if (!pat || !pat.gain) return null;
+    function fillMissingDbm(table, fallbackDbm) {
+        var ia, ie;
+        var fallback = isFinite(fallbackDbm) ? fallbackDbm : -110;
+        for (ia = 0; ia < PAT_N_AZ; ia++) {
+            for (ie = 0; ie < PAT_N_EL; ie++) {
+                if (!isNaN(table[ia][ie])) continue;
+                var best = nearestInCol(table[ia], ie);
+                table[ia][ie] = (best === null) ? fallback : best;
+            }
+        }
+    }
+
+    // 패턴 테이블 → 값 조회 함수(방위각 래핑 + 이중선형 보간)
+    function makeTableFn(pat, table) {
+        if (!pat || !table) return null;
         return function (azDeg, elDeg) {
             var azT = binAzDeg(azDeg) / pat.azStep;
             var ia0 = Math.floor(azT) % pat.nAz;
@@ -541,26 +690,57 @@ var SIONNA = (function () {
             var ie0 = Math.floor(elT);
             if (ie0 > pat.nEl - 2) ie0 = pat.nEl - 2;
             var fe = elT - ie0;
-            var g00 = pat.gain[ia0][ie0],   g01 = pat.gain[ia0][ie0 + 1];
-            var g10 = pat.gain[ia1][ie0],   g11 = pat.gain[ia1][ie0 + 1];
+            var g00 = table[ia0][ie0],   g01 = table[ia0][ie0 + 1];
+            var g10 = table[ia1][ie0],   g11 = table[ia1][ie0 + 1];
+            // 결측 빈(fill=false) 인접 조회는 NaN 반환 → 렌더링에서 제외
+            if (isNaN(g00) || isNaN(g01) || isNaN(g10) || isNaN(g11)) return NaN;
             var gx0 = g00 * (1 - fa) + g10 * fa;
             var gx1 = g01 * (1 - fa) + g11 * fa;
             return gx0 * (1 - fe) + gx1 * fe;
         };
     }
 
+    function makeGainFn(pat) {
+        return makeTableFn(pat, pat && pat.gain);
+    }
+
+    function makeDbmFn(pat) {
+        return makeTableFn(pat, pat && pat.dbm);
+    }
+
     // ================== 데이터 로드 (조용한 로딩 지원) ==================
 
     function hasData() { return !!data; }
 
+    // 로드된 메타 반환 (안테나 설치고도 등 — 빔패턴 하부 볼륨 절단에서 사용)
+    function getMeta() { return data ? data.meta : null; }
+
     // UI 표시 없이 JSON만 확보 (이미 로드돼 있으면 즉시 콜백)
-    function ensureData(cb) {
-        if (data) { cb(null, data); return; }
-        fetch(DATA_URL).then(function (res) {
+    function fetchSource(sourceKey) {
+        var key = DATA_SOURCES[sourceKey] ? sourceKey : "reflected";
+        if (dataBySource[key]) return Promise.resolve(dataBySource[key]);
+        return fetch(sourceInfo(key).url).then(function (res) {
             if (!res.ok) throw new Error("HTTP " + res.status);
             return res.json();
         }).then(function (json) {
-            data = json;
+            dataBySource[key] = json;
+            return json;
+        });
+    }
+
+    function activateSource(sourceKey, json) {
+        clearCollections();
+        currentSource = DATA_SOURCES[sourceKey] ? sourceKey : "reflected";
+        data = json;
+        patternCache = {};
+    }
+
+    function ensureData(cb) {
+        var sel = $("sionna-source");
+        var key = sel && DATA_SOURCES[sel.value] ? sel.value : currentSource;
+        if (data && currentSource === key) { cb(null, data); return; }
+        fetchSource(key).then(function (json) {
+            activateSource(key, json);
             cb(null, data);
         }).catch(function (err) {
             console.error("[SIONNA]", err);
@@ -571,12 +751,15 @@ var SIONNA = (function () {
     // 패턴 추출 캐시 ("all" | "100" | "200", ...)
     var patternCache = {};
 
-    function getPattern(key) {
+    function getPattern(key, opts) {
         if (!data) return null;
-        var k = key ? String(key) : "all";
+        var base = key ? String(key) : "all";
+        // 옵션 조합별로 캐시 구분 (표시 방식/정규화 옵션 지원)
+        var k = base + "|" + (opts && opts.fill === false ? "nofill" : "fill") +
+                "|" + (opts && opts.norm === "global" ? "global" : "per");
         if (Object.prototype.hasOwnProperty.call(patternCache, k)) return patternCache[k];
-        var altList = (k === "all") ? null : [k];
-        var pat = extractPattern(data, altList);
+        var altList = (base === "all") ? null : [base];
+        var pat = extractPattern(data, altList, opts);
         patternCache[k] = pat;
         return pat;
     }
@@ -586,10 +769,10 @@ var SIONNA = (function () {
     function renderResultTable() {
         var box = $("sionna-result");
         if (!box || !data) return;
-        var th = data.meta.coverageThresholdDbm;
         var rows = summarize(data);
-        var html = '<table class="alt-table"><tr>' +
-            '<th>단말 고도</th><th>평균 RSRP</th><th>최소</th><th>≥' + th + 'dBm</th>' +
+        var html = '<div class="alt-note"><strong>' + sourceInfo(currentSource).label + '</strong></div>' +
+            '<table class="alt-table"><tr>' +
+            '<th>단말 고도</th><th>평균 RSRP</th><th>최소</th><th>최대</th>' +
             '</tr>';
         for (var i = 0; i < rows.length; i++) {
             var s = rows[i].stats;
@@ -598,14 +781,60 @@ var SIONNA = (function () {
                 '<td><span class="alt-chip" style="background:' +
                     colorForDbm(s.meanDbm) + '"></span>' + s.meanDbm.toFixed(1) + ' dBm</td>' +
                 '<td>' + s.minDbm.toFixed(1) + '</td>' +
-                '<td>' + s.coveragePct.toFixed(1) + '%</td>' +
+                '<td>' + s.maxDbm.toFixed(1) + '</td>' +
                 '</tr>';
         }
         html += '</table>';
-        html += '<div class="alt-note">Sionna RT · ' + data.meta.frequencyMHz + 'MHz · TX ' +
+        html += '<div class="alt-note">' + (data.meta.tool || sourceInfo(currentSource).label) + ' · ' +
+            data.meta.frequencyMHz + 'MHz · TX ' +
             data.meta.txPowerDbm + 'dBm · 안테나 ' + data.meta.antennaMaxGainDbi +
             ' dBi (' + data.meta.antennaModel + ') · 설치고도 ' + data.meta.antennaHeightM +
             'm · 격자 ' + data.meta.cellSizeM + 'm</div>';
+        html += '<p class="hint">-100 dBm은 수신 가능률 계산용 보조 판정선이며, 위 절대 RSRP와 색상 범례의 기준값이 아닙니다.</p>';
+        box.innerHTML = html;
+    }
+
+    function renderComparisonTable(reflected, freeSpace, formula) {
+        var box = $("sionna-compare-result");
+        if (!box) return;
+        var rows = compareDatasets(reflected, freeSpace);
+        var formulaRows = compareDatasets(freeSpace, formula);
+        if (!rows.length) {
+            box.innerHTML = '<p class="hint">비교 가능한 공통 고도 결과가 없습니다.</p>';
+            return;
+        }
+        var html = '<div class="alt-note"><strong>세 모델 절대 RSRP 비교</strong><br>' +
+            '평탄=Sionna 반사 포함 · 직접파=Sionna 직접파만</div>' +
+            '<div class="alt-table-scroll"><table class="alt-table alt-table-compact">' +
+            '<tr><th>고도</th><th>평탄</th><th>직접파</th><th>Friis</th></tr>';
+        for (var i = 0; i < rows.length; i++) {
+            var formulaMean = formulaRows[i] ? formulaRows[i].freeSpace.meanDbm : NaN;
+            html += '<tr><td>' + rows[i].alt + 'm</td>' +
+                '<td>' + rows[i].reflected.meanDbm.toFixed(1) + '</td>' +
+                '<td>' + rows[i].freeSpace.meanDbm.toFixed(1) + '</td>' +
+                '<td>' + (isFinite(formulaMean) ? formulaMean.toFixed(1) : '-') + '</td></tr>';
+        }
+        var sel = $("sionna-alt");
+        var selectedAlt = sel && sel.value ? String(sel.value) : String(rows[0].alt);
+        var detail = rows[0];
+        for (var j = 0; j < rows.length; j++) {
+            if (String(rows[j].alt) === selectedAlt) { detail = rows[j]; break; }
+        }
+        var formulaDetail = formulaRows[0];
+        for (var k = 0; k < formulaRows.length; k++) {
+            if (String(formulaRows[k].alt) === selectedAlt) { formulaDetail = formulaRows[k]; break; }
+        }
+        html += '</table></div><div class="alt-note"><strong>' + detail.alt +
+            'm 동일 셀 ' + detail.pointCount + '개</strong><br>' +
+            '지면 반사 기여(Sionna 평탄−직접파): 중앙값 ' +
+            (detail.medianDeltaDb >= 0 ? '+' : '') + detail.medianDeltaDb.toFixed(1) +
+            ' dB · 범위 ' + detail.minDeltaDb.toFixed(1) + ' ~ ' +
+            (detail.maxDeltaDb >= 0 ? '+' : '') + detail.maxDeltaDb.toFixed(1) + ' dB<br>' +
+            '수식 차이(Sionna 직접파−Friis): 평균 ' +
+            (formulaDetail.meanDeltaDb >= 0 ? '+' : '') + formulaDetail.meanDeltaDb.toFixed(1) +
+            ' dB · 중앙값 ' + (formulaDetail.medianDeltaDb >= 0 ? '+' : '') +
+            formulaDetail.medianDeltaDb.toFixed(1) + ' dB</div>' +
+            '<p class="hint">Friis는 Sionna 없이 3차원 거리와 측정 방향이득으로 계산합니다. -100 dBm 판정선은 비교에 사용하지 않습니다.</p>';
         box.innerHTML = html;
     }
 
@@ -623,22 +852,35 @@ var SIONNA = (function () {
     }
 
     function loadData() {
-        if (data) { onDataReady(); return; }
+        var sel = $("sionna-source");
+        var requestedSource = sel && DATA_SOURCES[sel.value] ? sel.value : currentSource;
+        if (data && currentSource === requestedSource) { onDataReady(); return; }
         if (loading) return;
         loading = true;
-        setStatus("Sionna 예측 결과를 불러오는 중...");
-        fetch(DATA_URL).then(function (res) {
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            return res.json();
-        }).then(function (json) {
-            data = json;
+        setStatus(sourceInfo(requestedSource).label + " 결과를 불러오는 중...");
+        fetchSource(requestedSource).then(function (json) {
+            activateSource(requestedSource, json);
             loading = false;
             onDataReady();
         }).catch(function (err) {
             loading = false;
             console.error("[SIONNA]", err);
-            setStatus("Sionna 결과 로드 실패: " + err.message +
-                      " (서버 실행 및 Data/sionna/sionna_coverage.json 확인)", true);
+            setStatus(sourceInfo(requestedSource).label + " 결과 로드 실패: " + err.message +
+                      " (서버 실행 및 Data/sionna/ 결과 파일 확인)", true);
+        });
+    }
+
+    function compareEnvironments() {
+        setStatus("평탄 지면과 자유공간 결과를 비교하는 중...");
+        Promise.all([
+            fetchSource("reflected"), fetchSource("freeSpace"), fetchSource("formula")
+        ]).then(function (sets) {
+            comparisonSets = sets;
+            renderComparisonTable(sets[0], sets[1], sets[2]);
+            setStatus("세 전파 모델 절대 RSRP 비교 완료");
+        }).catch(function (err) {
+            console.error("[SIONNA compare]", err);
+            setStatus("환경 비교 실패: " + err.message + " (두 결과 파일을 확인하세요.)", true);
         });
     }
 
@@ -648,28 +890,41 @@ var SIONNA = (function () {
             renderResultTable();
             showLegend();
             var alts = data.meta.altitudesM || [];
-            if (alts.length) showAltitude(String(alts[0]));
-            setStatus("Sionna 예측 로드 완료: 단말 고도 " + alts.join("/") + "m");
+            resolveBaseTerrainHeight(function (baseH) {
+                if (alts.length) showAltitude(String(alts[0]));
+                setStatus(sourceInfo(currentSource).label + " 로드 완료: 단말 고도 " + alts.join("/") + "m · 기준 지표 " + baseH.toFixed(1) + "m");
+            });
         });
     }
 
     function hide() {
         clearCollections();
         hideLegend();
-        setStatus("Sionna 예측 숨김");
+        setStatus("커버리지 예측 숨김");
     }
 
     function init() {
         var btnLoad = $("btn-sionna-load");
         var btnHide = $("btn-sionna-hide");
+        var btnCompare = $("btn-sionna-compare");
+        var selSource = $("sionna-source");
         var selAlt = $("sionna-alt");
         var selMode = $("sionna-mode");
         var btnCorr = $("btn-sionna-corridor");
         if (btnLoad) btnLoad.addEventListener("click", loadData);
         if (btnHide) btnHide.addEventListener("click", hide);
+        if (btnCompare) btnCompare.addEventListener("click", compareEnvironments);
+        if (selSource) {
+            selSource.addEventListener("change", function () {
+                loadData();
+            });
+        }
         if (selAlt) {
             selAlt.addEventListener("change", function () {
                 if (data) showAltitude(selAlt.value);
+                if (comparisonSets) {
+                    renderComparisonTable(comparisonSets[0], comparisonSets[1], comparisonSets[2]);
+                }
             });
         }
         if (selMode) {
@@ -716,11 +971,14 @@ var SIONNA = (function () {
         dbmToRgb01: dbmToRgb01,
         computeStats: computeStats,
         summarize: summarize,
+        compareDatasets: compareDatasets,
         enuOffsetM: enuOffsetM,
         filterCorridor: filterCorridor,
         extractPattern: extractPattern,
         makeGainFn: makeGainFn,
+        makeDbmFn: makeDbmFn,
         hasData: hasData,
+        getMeta: getMeta,
         ensureData: ensureData,
         getPattern: getPattern
     };
@@ -729,7 +987,3 @@ var SIONNA = (function () {
 if (typeof module !== "undefined" && module.exports) {
     module.exports = SIONNA;
 }
-
-
-
-

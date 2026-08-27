@@ -3,44 +3,305 @@
 //   - Cesium 비의존 순수 계산 모듈 (node 테스트 가능)
 //   - 전역: window.BEAMPATTERN
 // ------------------------------------------------------------
-// 패턴 특성 (측정 시험 성적서 기준):
-//   · 최대이득 방향 ±90°(수평) = 0 dBi (기계적으로 0 고정/정규화)
-//   · 전면/후면(0°/180°, 천정·저중) Null ≒ -30 dB
-//   · 부엽: ±50~60°( -7~-10dB ), ±120~140°( -12~-18dB )
-//   · 수평면(Azimuth) 균일 → 3D 도넛(토러스) 형상
+// 패턴 특성 (OM900_pattern_1.csv 910MHz 수직면 기준):
+//   · Python pattern_loader.py와 같은 +theta/-theta linear-power 평균 사용
+//   · Azimuth는 현재 omni 가정
+//   · 아래 테이블은 theta(0=천정, 90=수평, 180=저면)의 상대이득
+//   · run_coverage.py가 생성한 antenna_pattern.json이 있으면 브라우저에서 자동 동기화
 // ============================================================
 var BEAMPATTERN = (function () {
     "use strict";
 
-    // 각도(°) : 도표 상의 각도 (0=천정, 90/270=수평, 180=저중)
-    // 이득(dB) : 상대이득 (최대 0 dB 정규화)
+    // theta(°): 0=천정, 90=수평, 180=저면
+    // gain(dB): 상대이득, 최대=0 dB
     var BEAM_TABLE = [
-        [0,   -30.0], [10,  -26.5], [20,  -22.3], [30,  -16.0],
-        [40,  -10.5], [50,   -7.5], [60,   -9.0], [70,  -12.5],
-        [80,   -8.5], [90,    0.0], [100,  -8.5], [110, -12.5],
-        [120, -18.0], [130, -16.5], [140, -16.5], [150, -22.0],
-        [160, -26.0], [170, -29.0], [180, -30.0],
-        [190, -26.0], [200, -22.0], [210, -16.5], [220, -18.0],
-        [230, -12.0], [240,  -9.0], [250, -12.5], [260,  -8.5],
-        [270,   0.0], [280,  -8.5], [290, -12.5], [300,  -9.0],
-        [310, -10.5], [320, -16.0], [330, -22.3], [340, -26.5],
-        [350, -29.0], [360, -30.0]
+        [0, -33.2407],
+        [1, -32.2622],
+        [2, -30.2870],
+        [3, -28.2773],
+        [4, -26.4142],
+        [5, -24.8118],
+        [6, -23.5093],
+        [7, -22.3236],
+        [8, -21.3713],
+        [9, -20.4600],
+        [10, -19.7224],
+        [11, -19.0194],
+        [12, -18.3833],
+        [13, -17.8242],
+        [14, -17.3297],
+        [15, -16.9094],
+        [16, -16.5419],
+        [17, -16.2461],
+        [18, -16.0098],
+        [19, -15.8033],
+        [20, -15.5982],
+        [21, -15.3774],
+        [22, -15.1220],
+        [23, -14.8443],
+        [24, -14.5450],
+        [25, -14.2355],
+        [26, -13.9359],
+        [27, -13.6142],
+        [28, -13.3352],
+        [29, -13.1093],
+        [30, -12.9908],
+        [31, -12.9747],
+        [32, -13.0216],
+        [33, -13.1309],
+        [34, -13.3164],
+        [35, -13.5869],
+        [36, -13.9714],
+        [37, -14.4223],
+        [38, -14.9740],
+        [39, -15.5412],
+        [40, -16.2017],
+        [41, -16.8645],
+        [42, -17.6806],
+        [43, -18.4852],
+        [44, -19.3898],
+        [45, -20.1022],
+        [46, -20.8934],
+        [47, -21.4232],
+        [48, -21.6496],
+        [49, -21.4468],
+        [50, -21.1532],
+        [51, -20.9013],
+        [52, -20.4771],
+        [53, -19.9721],
+        [54, -19.4181],
+        [55, -18.8736],
+        [56, -17.9821],
+        [57, -16.8835],
+        [58, -15.6273],
+        [59, -14.4509],
+        [60, -13.3132],
+        [61, -12.2458],
+        [62, -11.2341],
+        [63, -10.3150],
+        [64, -9.3796],
+        [65, -8.5304],
+        [66, -7.6412],
+        [67, -6.8450],
+        [68, -6.0959],
+        [69, -5.4458],
+        [70, -4.8690],
+        [71, -4.3257],
+        [72, -3.8117],
+        [73, -3.3694],
+        [74, -2.9822],
+        [75, -2.6291],
+        [76, -2.2898],
+        [77, -1.9751],
+        [78, -1.6953],
+        [79, -1.4451],
+        [80, -1.2047],
+        [81, -0.9742],
+        [82, -0.7536],
+        [83, -0.5578],
+        [84, -0.4033],
+        [85, -0.2645],
+        [86, -0.1454],
+        [87, -0.0606],
+        [88, -0.0257],
+        [89, -0.0254],
+        [90, 0.0000],
+        [91, -0.0281],
+        [92, -0.0470],
+        [93, -0.0857],
+        [94, -0.1730],
+        [95, -0.2950],
+        [96, -0.4566],
+        [97, -0.6304],
+        [98, -0.8258],
+        [99, -1.0412],
+        [100, -1.2912],
+        [101, -1.5528],
+        [102, -1.8257],
+        [103, -2.1535],
+        [104, -2.5883],
+        [105, -3.0877],
+        [106, -3.6211],
+        [107, -4.1341],
+        [108, -4.6999],
+        [109, -5.3099],
+        [110, -6.0083],
+        [111, -6.7277],
+        [112, -7.5636],
+        [113, -8.4485],
+        [114, -9.4080],
+        [115, -10.4834],
+        [116, -11.6677],
+        [117, -13.0676],
+        [118, -14.5089],
+        [119, -16.0324],
+        [120, -17.6004],
+        [121, -18.8711],
+        [122, -19.2762],
+        [123, -18.8455],
+        [124, -18.0385],
+        [125, -17.0596],
+        [126, -16.1504],
+        [127, -15.3899],
+        [128, -14.9128],
+        [129, -14.4909],
+        [130, -14.1016],
+        [131, -13.8078],
+        [132, -13.5960],
+        [133, -13.4547],
+        [134, -13.3180],
+        [135, -13.1828],
+        [136, -13.0321],
+        [137, -12.8619],
+        [138, -12.6728],
+        [139, -12.5304],
+        [140, -12.4856],
+        [141, -12.5040],
+        [142, -12.5475],
+        [143, -12.6180],
+        [144, -12.6559],
+        [145, -12.7352],
+        [146, -12.8296],
+        [147, -12.9755],
+        [148, -13.1233],
+        [149, -13.2623],
+        [150, -13.3457],
+        [151, -13.4070],
+        [152, -13.4552],
+        [153, -13.5422],
+        [154, -13.6536],
+        [155, -13.8296],
+        [156, -13.9955],
+        [157, -14.2157],
+        [158, -14.4057],
+        [159, -14.6504],
+        [160, -14.9339],
+        [161, -15.2557],
+        [162, -15.6177],
+        [163, -16.0170],
+        [164, -16.4683],
+        [165, -16.9441],
+        [166, -17.4499],
+        [167, -18.0114],
+        [168, -18.5885],
+        [169, -19.2700],
+        [170, -20.0304],
+        [171, -20.9155],
+        [172, -21.8845],
+        [173, -23.0357],
+        [174, -24.2996],
+        [175, -25.7921],
+        [176, -27.3580],
+        [177, -29.2928],
+        [178, -31.4554],
+        [179, -33.5064],
+        [180, -34.5907]
     ];
+
+    // 측정 H-Plane 상대이득. JSON 로드 전에는 옴니(0dB)로 안전하게 시작한다.
+    var HORIZONTAL_TABLE = [[-180, 0], [180, 0]];
+    var PATTERN_META = {
+        model: "PM-OM900_06",
+        frequencyMHz: 910,
+        maxGainDbi: 5.4,
+        approximation: "measured V-plane + omni H-plane fallback"
+    };
 
     var WGS84_A = 6378137.0;                 // 장반경 (m)
     var WGS84_E2 = 6.69437999014e-3;         // 제1이심률 제곱
 
     function toRad(deg) { return deg * Math.PI / 180; }
 
-    // el(고도각, deg): 0=수평, +90=천정, -90=저중
-    // 도표 각도 t = ((90 - el) mod 360 + 360) mod 360 후 선형보간
+    // el: 세계/안테나 좌표계 고도각. 0=수평, +90=천정, -90=저면
+    // Sionna theta = 90 - elevation
     function gainAtElevation(elDeg) {
-        var t = ((90 - elDeg) % 360 + 360) % 360;
-        var i0 = Math.floor(t / 10);
-        if (i0 >= BEAM_TABLE.length - 1) i0 = BEAM_TABLE.length - 2;
-        var a = BEAM_TABLE[i0], b = BEAM_TABLE[i0 + 1];
-        var f = (t - a[0]) / (b[0] - a[0]);
-        return a[1] + f * (b[1] - a[1]);
+        var theta = Math.max(0, Math.min(180, 90 - Number(elDeg)));
+        var i0 = Math.floor(theta);
+        var i1 = Math.min(180, i0 + 1);
+        var f = theta - i0;
+        var g0 = BEAM_TABLE[i0][1], g1 = BEAM_TABLE[i1][1];
+        return g0 * (1 - f) + g1 * f;
+    }
+
+    function horizontalGainAtAzimuth(azDeg) {
+        var az = ((Number(azDeg) + 180) % 360 + 360) % 360 - 180;
+        var table = HORIZONTAL_TABLE;
+        if (!table || table.length < 2) return 0;
+        var i0 = 0;
+        while (i0 + 1 < table.length && table[i0 + 1][0] < az) i0++;
+        var i1 = Math.min(table.length - 1, i0 + 1);
+        var x0 = table[i0][0], x1 = table[i1][0];
+        var y0 = table[i0][1], y1 = table[i1][1];
+        var f = (x1 === x0) ? 0 : (az - x0) / (x1 - x0);
+        return y0 * (1 - f) + y1 * f;
+    }
+
+    // 측정된 두 2D cut을 separable 3D로 합성한 안테나 고유 상대이득.
+    function gainAtDirection(azDeg, elDeg) {
+        return gainAtElevation(elDeg) + horizontalGainAtAzimuth(azDeg);
+    }
+
+    function setThetaPattern(thetaDeg, relativeGainDb) {
+        if (!thetaDeg || !relativeGainDb || thetaDeg.length !== relativeGainDb.length || thetaDeg.length < 2) return false;
+        var table = [];
+        for (var t = 0; t <= 180; t++) {
+            var j = 0;
+            while (j + 1 < thetaDeg.length && thetaDeg[j + 1] < t) j++;
+            var j2 = Math.min(thetaDeg.length - 1, j + 1);
+            var x0 = Number(thetaDeg[j]), x1 = Number(thetaDeg[j2]);
+            var y0 = Number(relativeGainDb[j]), y1 = Number(relativeGainDb[j2]);
+            var q = (x1 === x0) ? 0 : (t - x0) / (x1 - x0);
+            table.push([t, y0 * (1 - q) + y1 * q]);
+        }
+        BEAM_TABLE.length = 0;
+        for (var k = 0; k < table.length; k++) BEAM_TABLE.push(table[k]);
+        return true;
+    }
+
+    function setHorizontalPattern(phiDeg, relativeGainDb) {
+        if (!phiDeg || !relativeGainDb || phiDeg.length !== relativeGainDb.length || phiDeg.length < 2) return false;
+        var pairs = [];
+        for (var i = 0; i < phiDeg.length; i++) {
+            var x = Number(phiDeg[i]), y = Number(relativeGainDb[i]);
+            if (!isFinite(x) || !isFinite(y)) continue;
+            pairs.push([x, y]);
+        }
+        pairs.sort(function (a, b) { return a[0] - b[0]; });
+        if (pairs.length < 2) return false;
+        HORIZONTAL_TABLE.length = 0;
+        for (i = 0; i < pairs.length; i++) HORIZONTAL_TABLE.push(pairs[i]);
+        return true;
+    }
+
+    function getPatternMeta() {
+        return {
+            model: PATTERN_META.model,
+            frequencyMHz: PATTERN_META.frequencyMHz,
+            maxGainDbi: PATTERN_META.maxGainDbi,
+            approximation: PATTERN_META.approximation
+        };
+    }
+
+    function loadPatternJson(url, cb) {
+        if (typeof fetch === "undefined") { if (cb) cb(new Error("fetch unavailable")); return; }
+        fetch(url || "Data/sionna/antenna_pattern.json", {cache: "no-store"})
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (j) {
+                var vertical = j.verticalRelativeGainDb || j.relativeGainDb;
+                if (!setThetaPattern(j.thetaDeg, vertical)) throw new Error("invalid antenna pattern JSON");
+                if (j.phiDeg && j.horizontalRelativeGainDb) {
+                    if (!setHorizontalPattern(j.phiDeg, j.horizontalRelativeGainDb)) {
+                        throw new Error("invalid horizontal antenna pattern JSON");
+                    }
+                }
+                PATTERN_META.model = j.model || PATTERN_META.model;
+                PATTERN_META.frequencyMHz = Number(j.frequencyMHz) || PATTERN_META.frequencyMHz;
+                PATTERN_META.maxGainDbi = Number(j.maxGainDbi);
+                if (!isFinite(PATTERN_META.maxGainDbi)) PATTERN_META.maxGainDbi = 5.4;
+                PATTERN_META.approximation = j.approximation || PATTERN_META.approximation;
+                if (cb) cb(null, j);
+            })
+            .catch(function (e) { if (cb) cb(e); });
     }
 
     // WGS84 측지좌표 → ECEF, 로컬 ENU 오프셋(m) 적용
@@ -141,6 +402,30 @@ var BEAMPATTERN = (function () {
         return (gainDb - GAIN_MIN) / (0 - GAIN_MIN);
     }
 
+    // 빔패턴 전용 컬러맵: t∈[0,1] → {r,g,b} 0..255 (남색(약) → 핑크(강))
+    //   - RSRP 팔레트(빨강~초록)와 색조가 겹치지 않아 지도 위에서 즉시 구분됨
+    var BEAM_C_LO = { r: 79, g: 70, b: 229 };    // #4f46e5 (t=0, -30dB 이하)
+    var BEAM_C_HI = { r: 244, g: 114, b: 182 };  // #f472b6 (t=1, 0dB 최대)
+    function beamColor(t) {
+        t = Math.max(0, Math.min(1, t));
+        return {
+            r: Math.round(BEAM_C_LO.r + (BEAM_C_HI.r - BEAM_C_LO.r) * t),
+            g: Math.round(BEAM_C_LO.g + (BEAM_C_HI.g - BEAM_C_LO.g) * t),
+            b: Math.round(BEAM_C_LO.b + (BEAM_C_HI.b - BEAM_C_LO.b) * t)
+        };
+    }
+
+    // 빔패턴 이득 bin (강→약 순, 5dB 단위) — 전용 범례용
+    var BEAM_BINS = [
+        { lo: -5,        hi: 0,   color: "#f472b6" },   // 핑크 (강)
+        { lo: -10,       hi: -5,  color: "#e879f9" },
+        { lo: -15,       hi: -10, color: "#c084fc" },
+        { lo: -20,       hi: -15, color: "#a78bfa" },
+        { lo: -25,       hi: -20, color: "#818cf8" },
+        { lo: -30,       hi: -25, color: "#6366f1" },
+        { lo: -Infinity, hi: -30, color: "#4f46e5" }    // 남색 (약)
+    ];
+
     // 로컬 ENU 벡터를 틸트/스윙으로 회전 (Rodrigues)
     // 틸트: swing 방위 방향이 아래로 내려감 (다운틸트 양수)
     // 스윙이 0이면 북쪽(N+) 방향으로 다운틸트
@@ -199,7 +484,8 @@ var BEAMPATTERN = (function () {
             for (var ie = 0; ie < nEl; ie++) {
                 el = els[ie];
                 var g = gainFn(azs[ia], el);
-                var r = scaleMeters * Math.pow(10, g / 20);   // 진폭 비례 반경
+                // 결측(NaN/Infinity) 빈: 반경 0으로 저장하고 면 생성에서 제외
+                var r = isFinite(g) ? scaleMeters * Math.pow(10, g / 20) : 0;   // 진폭 비례 반경
                 var er = toRad(el);
                 var pe = r * Math.cos(er) * cAz;
                 var pn = r * Math.cos(er) * sAz;
@@ -219,6 +505,9 @@ var BEAMPATTERN = (function () {
             for (ie = 0; ie < nEl - 1; ie++) {
                 var v00 = idxMap[ia + ":" + ie],     v01 = idxMap[ia + ":" + (ie + 1)];
                 var v10 = idxMap[ia2 + ":" + ie],    v11 = idxMap[ia2 + ":" + (ie + 1)];
+                // 4 꼭짓점 중 하나라도 결측이면 면 제외 (데이터 없는 영역은 구멍)
+                if (!isFinite(positions[v00].gainDb) || !isFinite(positions[v01].gainDb) ||
+                    !isFinite(positions[v10].gainDb) || !isFinite(positions[v11].gainDb)) continue;
                 indices.push(v00, v10, v01, v01, v10, v11);
             }
         }
@@ -239,10 +528,18 @@ var BEAMPATTERN = (function () {
         BEAM_TABLE: BEAM_TABLE,
         GAIN_MIN: GAIN_MIN,
         gainAtElevation: gainAtElevation,
+        horizontalGainAtAzimuth: horizontalGainAtAzimuth,
+        gainAtDirection: gainAtDirection,
+        setThetaPattern: setThetaPattern,
+        setHorizontalPattern: setHorizontalPattern,
+        getPatternMeta: getPatternMeta,
+        loadPatternJson: loadPatternJson,
         enuToEcef: enuToEcef,
         solveOLS3: solveOLS3,
         solveOLS2: solveOLS2,
         jetColor: jetColor,
+        beamColor: beamColor,
+        BEAM_BINS: BEAM_BINS,
         gainToT: gainToT,
         rotateENU: rotateENU,
         tiltedGain: tiltedGain,
@@ -251,6 +548,11 @@ var BEAMPATTERN = (function () {
         buildPatternMeshFromGain: buildPatternMeshFromGain
     };
 })();
+
+if (typeof window !== "undefined" && window.BEAMPATTERN && window.fetch) {
+    // Python이 생성한 패턴 JSON과 UI 시각화를 자동 동기화. 실패 시 내장 CSV-derived table 사용.
+    window.BEAMPATTERN.loadPatternJson("Data/sionna/antenna_pattern.json", function () {});
+}
 
 if (typeof module !== "undefined" && module.exports) {
     module.exports = BEAMPATTERN;

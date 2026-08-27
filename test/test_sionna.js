@@ -5,6 +5,7 @@
 "use strict";
 
 var path = require("path");
+global.RF_COLOR = require(path.join(__dirname, "..", "js", "rfcolor.js"));
 var SIONNA = require(path.join(__dirname, "..", "js", "sionna.js"));
 
 var failures = 0;
@@ -30,32 +31,28 @@ function near(a, b, eps) {
 
 // ---------- dbmToT ----------
 test("dbmToT: 범위 클램프", function () {
-    near(SIONNA.dbmToT(-70), 0.5, 1e-9);   // 중앙값 (-40~-100 기준)
-    near(SIONNA.dbmToT(-200), 1, 1e-9);    // 약한 신호 하한 클램프
-    near(SIONNA.dbmToT(0), 0, 1e-9);       // 강한 신호 상한 클램프
+    near(SIONNA.dbmToT(-90), 0.5, 1e-9);   // 중앙값 (-120~-60 기준)
+    near(SIONNA.dbmToT(-200), 0, 1e-9);    // 약한 신호 하한 클램프
+    near(SIONNA.dbmToT(0), 1, 1e-9);       // 강한 신호 상한 클램프
 });
 
-// ---------- colorForDbm (10dB 이산 bin, 기존 RF 범례 팔레트) ----------
-test("colorForDbm: 10dB 단위 이산 색상 (초록=강함 → 빨강=약함)", function () {
-    assert(SIONNA.colorForDbm(-45).indexOf("hsl(120,") === 0, "-45dBm은 밝은 초록: " + SIONNA.colorForDbm(-45));
-    assert(SIONNA.colorForDbm(-45).indexOf("62%)") > 0, "-45dBm은 최강(명도 62%): " + SIONNA.colorForDbm(-45));
-    assert(SIONNA.colorForDbm(-60).indexOf("hsl(120,78%,50%)") === 0, "-60dBm은 초록: " + SIONNA.colorForDbm(-60));
-    assert(SIONNA.colorForDbm(-70).indexOf("hsl(90,78%,50%)") === 0, "-70dBm은 연두: " + SIONNA.colorForDbm(-70));
-    assert(SIONNA.colorForDbm(-80).indexOf("hsl(60,78%,50%)") === 0, "-80dBm은 노랑: " + SIONNA.colorForDbm(-80));
-    assert(SIONNA.colorForDbm(-90).indexOf("hsl(30,78%,50%)") === 0, "-90dBm은 주황: " + SIONNA.colorForDbm(-90));
-    assert(SIONNA.colorForDbm(-100).indexOf("hsl(0,78%,50%)") === 0, "-100dBm은 빨강: " + SIONNA.colorForDbm(-100));
-    assert(SIONNA.colorForDbm(-30).indexOf("hsl(120,") === 0, "-30dBm(범위 밖 강함)도 초록 클램프");
-    assert(SIONNA.colorForDbm(-150).indexOf("hsl(0,") === 0, "-150dBm(범위 밖 약함)도 빨강 클램프");
+// ---------- colorForDbm (공통 연속 RSRP 팔레트) ----------
+test("colorForDbm: 공통 연속 색상", function () {
+    assert(SIONNA.colorForDbm(-60) === "rgb(239,27,23)", "-60dBm은 빨강");
+    assert(SIONNA.colorForDbm(-80) === "rgb(255,212,0)", "-80dBm은 노랑");
+    assert(SIONNA.colorForDbm(-100) === "rgb(0,168,90)", "-100dBm은 초록");
+    assert(SIONNA.colorForDbm(-110) === "rgb(63,55,165)", "-110dBm은 남색");
+    assert(SIONNA.colorForDbm(-120) === "rgb(32,32,32)", "-120dBm은 검정");
 });
 
 // ---------- dbmToRgb01 ----------
 test("dbmToRgb01: bin 색상의 0..1 RGB 변환", function () {
-    var g = SIONNA.dbmToRgb01(-60);   // hsl(120,78%,50%) 초록 ≈ (0.11, 0.89, 0.11)
-    near(g[1], 0.89, 1e-3); near(g[0], 0.11, 1e-3); near(g[2], 0.11, 1e-3);
-    assert(g[1] > g[0] && g[1] > g[2], "초록 성분이 우세해야 함");
-    var r = SIONNA.dbmToRgb01(-100);  // hsl(0,78%,50%) 빨강 ≈ (0.89, 0.11, 0.11)
-    near(r[0], 0.89, 1e-3); near(r[1], 0.11, 1e-3); near(r[2], 0.11, 1e-3);
-    assert(r[0] > r[1] && r[0] > r[2], "빨강 성분이 우세해야 함");
+    var r = SIONNA.dbmToRgb01(-60);
+    near(r[0], 239 / 255, 1e-6); near(r[1], 27 / 255, 1e-6); near(r[2], 23 / 255, 1e-6);
+    assert(r[0] > r[1] && r[0] > r[2], "강한 신호는 빨강 성분이 우세해야 함");
+    var g = SIONNA.dbmToRgb01(-100);
+    near(g[0], 0, 1e-6); near(g[1], 168 / 255, 1e-6); near(g[2], 90 / 255, 1e-6);
+    assert(g[1] > g[0] && g[1] > g[2], "-100dBm은 초록 성분이 우세해야 함");
 });
 
 // ---------- computeStats ----------
@@ -130,6 +127,32 @@ test("summarize: meta.altitudesM 순서대로 요약", function () {
     assert(rows.length === 2, "누락된 고도 제외");
     assert(rows[0].alt === 100 && rows[1].alt === 200, "순서 유지");
     near(rows[0].stats.meanDbm, -70, 1e-9);
+});
+
+test("compareDatasets: 공통 고도 평균 차이 계산", function () {
+    var reflected = {
+        meta: { altitudesM: [100, 200] },
+        grids: {
+            "100": { points: [[34, 127, -70], [34, 127.1, -80]], stats: { meanDbm: -75, coveragePct: 90 } },
+            "200": { points: [[34, 127, -79]], stats: { meanDbm: -79, coveragePct: 70 } }
+        }
+    };
+    var freeSpace = {
+        meta: { altitudesM: [100, 200] },
+        grids: {
+            "100": { points: [[34, 127, -72], [34, 127.1, -77]], stats: { meanDbm: -74.5, coveragePct: 85 } },
+            "200": { points: [[34, 127, -78]], stats: { meanDbm: -78, coveragePct: 75 } }
+        }
+    };
+    var rows = SIONNA.compareDatasets(reflected, freeSpace);
+    assert(rows.length === 2, "두 공통 고도");
+    near(rows[0].meanDeltaDb, -0.5, 1e-9);
+    near(rows[0].medianDeltaDb, -0.5, 1e-9);  // 셀 차이 -2, +3의 중앙값
+    near(rows[0].minDeltaDb, -3, 1e-9);
+    near(rows[0].maxDeltaDb, 2, 1e-9);
+    near(rows[0].groundStrongerPct, 50, 1e-9);
+    near(rows[0].freeStrongerPct, 50, 1e-9);
+    near(rows[1].meanDeltaDb, -1, 1e-9);
 });
 
 console.log("");

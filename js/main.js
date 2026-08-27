@@ -17,7 +17,6 @@ var MAIN = (function () {
     var measureMode = false;// 두 점 거리 측정 모드
     var measurePts = [];    // 측정 클릭 포인트(Cartesian3)
     var measureHandler = null;
-    var rsrpBins = [];      // RSRP 범례 빈(10단위)
 
     function $(id) { return document.getElementById(id); }
 
@@ -69,67 +68,16 @@ var MAIN = (function () {
         setStatus("이동: #" + (index + 1) + " (경도 " + fmt(p.lon) + ", 위도 " + fmt(p.lat) + ", 고도 " + fmt(p.appliedAlt, 2) + " m)");
     }
 
-    // ================== RSRP 색상 / 범례(10단위) ==================
-    function rsrpColorT(t) {
-        var hue = Math.max(0, Math.min(120, t * 120)); // 0(빨강, 나쁨) ~ 120(초록, 좋음)
-        return "hsl(" + hue + ", 78%, 50%)";
-    }
-
-    function computeRsrpBins(pts) {
-        var minV = null, maxV = null;
-        for (var i = 0; i < pts.length; i++) {
-            var r = Number(pts[i].rsrp);
-            if (isNaN(r)) continue;
-            if (minV === null || r < minV) minV = r;
-            if (maxV === null || r > maxV) maxV = r;
-        }
-        if (minV === null) return [];
-        var start = Math.floor(minV / 10) * 10;
-        var end = Math.floor(maxV / 10) * 10;
-        var bins = [];
-        for (var b = start; b <= end; b += 10) {
-            var t = (end === start) ? 1 : (b - start) / (end - start);
-            bins.push({ lo: b, hi: b + 10, color: rsrpColorT(t) });
-        }
-        return bins;
-    }
-
+    // ================== 공통 RSRP 색상 / 범례 ==================
     function colorForRsrp(v) {
-        if (v === null || v === undefined || isNaN(Number(v))) return "#9ca3af";
-        // 빈은 10dB 연속 구간 → 선형탐색 대신 인덱스 직접 계산
-        if (rsrpBins.length) {
-            var b = Math.floor(Number(v) / 10) * 10;
-            var idx = (b - rsrpBins[0].lo) / 10;
-            var i = Math.round(idx);
-            if (i >= 0 && i < rsrpBins.length && rsrpBins[i].lo === b) return rsrpBins[i].color;
-        }
+        if (window.RF_COLOR) return RF_COLOR.colorForDbm(v);
         return "#9ca3af";
     }
 
     function renderLegend() {
         var el = $("legend");
         if (!el) return;
-        el.innerHTML = "";
-        if (!rsrpBins.length) { el.style.display = "none"; return; }
-        el.style.display = "block";
-        var title = document.createElement("div");
-        title.className = "legend-title";
-        title.textContent = "RSRP 범례 (dBm · 10단위)";
-        el.appendChild(title);
-        for (var i = rsrpBins.length - 1; i >= 0; i--) {
-            var bin = rsrpBins[i];
-            var row = document.createElement("div");
-            row.className = "legend-row";
-            var sw = document.createElement("span");
-            sw.className = "legend-color";
-            sw.style.background = bin.color;
-            var lb = document.createElement("span");
-            lb.className = "legend-label";
-            lb.textContent = bin.lo + " 이상 ~ " + bin.hi + " 미만";
-            row.appendChild(sw);
-            row.appendChild(lb);
-            el.appendChild(row);
-        }
+        if (window.RF_COLOR) RF_COLOR.renderLegend(el);
     }
 
     // ================== 마커 ==================
@@ -220,7 +168,6 @@ var MAIN = (function () {
             clearPrediction();
             clearTxMarker();
             clearBeam();
-            rsrpBins = computeRsrpBins(points);
             for (var i = 0; i < points.length; i++) addMarker(points[i]);
             renderLegend();
             renderList();
@@ -450,6 +397,12 @@ var MAIN = (function () {
             sionnaChk.addEventListener("change", function () {
                 var row = $("beam-sionna-alt-row");
                 if (row) row.style.display = sionnaChk.checked ? "flex" : "none";
+                var styleRow = $("beam-sionna-style-row");
+                if (styleRow) styleRow.style.display = sionnaChk.checked ? "flex" : "none";
+                var normRow = $("beam-sionna-global-row");
+                if (normRow) normRow.style.display = sionnaChk.checked ? "" : "none";
+                var clipRow = $("beam-sionna-clip-row");
+                if (clipRow) clipRow.style.display = sionnaChk.checked ? "" : "none";
                 if (!sionnaChk.checked) {
                     if (beamVisible) { clearBeam(); renderBeam(); }   // 측정 패턴으로 복귀
                     return;
@@ -458,7 +411,7 @@ var MAIN = (function () {
                     setStatus("Sionna RT 예측 결과를 로드하는 중...");
                     ensureBeamSionnaData(function (err, d) {
                         if (err || !d) {
-                            setStatus("Sionna 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음"), true);
+                            setStatus("선택한 커버리지 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음"), true);
                             return;
                         }
                         populateBeamSionnaAlts(d);
@@ -470,9 +423,27 @@ var MAIN = (function () {
                 }
             });
         }
-        var beamSionnaAlt = $("beam-sionna-alt");
+var beamSionnaAlt = $("beam-sionna-alt");
         if (beamSionnaAlt) {
             beamSionnaAlt.addEventListener("change", function () {
+                if (beamVisible) { clearBeam(); renderBeam(); }
+            });
+        }
+        var beamSionnaStyle = $("beam-sionna-style");
+        if (beamSionnaStyle) {
+            beamSionnaStyle.addEventListener("change", function () {
+                if (beamVisible) { clearBeam(); renderBeam(); }
+            });
+        }
+        var beamSionnaGlobal = $("chk-beam-sionna-global");
+        if (beamSionnaGlobal) {
+            beamSionnaGlobal.addEventListener("change", function () {
+                if (beamVisible) { clearBeam(); renderBeam(); }
+            });
+        }
+        var beamSionnaClip = $("chk-beam-sionna-clip");
+        if (beamSionnaClip) {
+            beamSionnaClip.addEventListener("change", function () {
                 if (beamVisible) { clearBeam(); renderBeam(); }
             });
         }
@@ -484,8 +455,9 @@ var MAIN = (function () {
         }
         var altCompareBtn = $("btn-alt-compare");
 
-
-        prefillDefaultBs();   // 기본 기지국(config.js의 DEFAULT_BS) 입력란 자동 채움        if (altCompareBtn) altCompareBtn.addEventListener("click", compareAltitudes);
+        prefillDefaultBs();   // 기본 기지국(config.js의 DEFAULT_BS) 입력란 자동 채움
+        if (altCompareBtn) altCompareBtn.addEventListener("click", compareAltitudes);
+        renderLegend();
 
         setStatus("브이월드 3D 지도를 불러오는 중...");
     }
@@ -769,6 +741,7 @@ function prefillDefaultBs() {
     // ================== 안테나 빔패턴 (900MHz 옴니) ==================
     var beamEntities = [];      // 와이어프레임 폴리라인 엔티티
     var beamPrimitive = null;   // 표면 프리미티브(지원 시)
+var beamCapPrimitive = null;// 절단면(Cap) 프리미티브 (상단 절단 시 뚜껑 히트맵)
     var beamVisible = false;
     var beamSurfaceUnsupported = false;
     var _beamTilt = 0, _beamSwing = 0;   // 렌더당 1회 읽어 캐시 (정점 루프의 DOM 접근 제거)
@@ -791,6 +764,24 @@ function prefillDefaultBs() {
     // ---- Sionna RT 예측 기반 패턴 모드 ----
     function isBeamSionnaChecked() {
         var c = $("chk-beam-sionna");
+        return !!(c && c.checked);
+    }
+
+    // RT 예측 패턴 표시 방식: "hole"=샘플 영역만(결측 구멍, 기본/권장) / "fill"=보간 채움(기존)
+    function getBeamSionnaStyle() {
+        var sel = $("beam-sionna-style");
+        return (sel && sel.value === "fill") ? "fill" : "hole";
+    }
+
+    // RT 예측 패턴 정규화: true=전체 고도 공통 최대 기준(고도 간 비교 가능, 기본/권장)
+    function isBeamSionnaGlobalNorm() {
+        var c = $("chk-beam-sionna-global");
+        return !c || c.checked;
+    }
+
+    // RT 예측 패턴 상단 절단: true=선택 단말 수신 고도 평면 위를 잘라 하부 전파 볼륨만 표시(기본)
+    function isBeamSionnaClip() {
+        var c = $("chk-beam-sionna-clip");
         return !!(c && c.checked);
     }
 
@@ -819,7 +810,7 @@ function prefillDefaultBs() {
         }
     }
 
-    function localToCartesian(e, n, u) {
+function localToCartesian(e, n, u) {
         // 로컬 ENU(m) → 절대 ECEF (txRefForBeam 기준, 캐시된 틸트/스윙으로 회전)
         var rp = BEAMPATTERN.rotateENU(e, n, u, _beamTilt, _beamSwing);
         var p = BEAMPATTERN.enuToEcef(txRefForBeam.lon, txRefForBeam.lat, txRefForBeam.alt || 0, rp.e, rp.n, rp.u);
@@ -830,11 +821,13 @@ function prefillDefaultBs() {
 
     function addBeamPolyline(positions, colorCss, alpha, width) {
         var viewer = getViewer();
+        var color = Cesium.Color.fromCssColorString(colorCss);
+        if (!color) color = Cesium.Color.fromCssColorString("#7c3aed");
         var ent = viewer.entities.add({
             polyline: {
                 positions: positions,
                 width: width,
-                material: Cesium.Color.fromCssColorString(colorCss).withAlpha(alpha),
+                material: color.withAlpha(alpha),
                 clampToGround: false
             }
         });
@@ -854,12 +847,16 @@ function prefillDefaultBs() {
         updateTxMarker();
 
         // ---- 이득 소스 선택: Sionna RT 예측 기반 또는 측정 옴니 패턴 ----
-        var sionnaPat = null, gainFn = null, azDependent = false;
+        var sionnaPat = null, gainFn = null, rsrpFn = null, azDependent = false;
         if (isBeamSionnaChecked() && window.SIONNA && SIONNA.hasData()) {
             var selAlt = $("beam-sionna-alt");
-            sionnaPat = SIONNA.getPattern(selAlt ? selAlt.value : "all");
+            sionnaPat = SIONNA.getPattern(selAlt ? selAlt.value : "all", {
+                fill: getBeamSionnaStyle() === "fill",
+                norm: isBeamSionnaGlobalNorm() ? "global" : "per"
+            });
             if (sionnaPat) {
                 gainFn = SIONNA.makeGainFn(sionnaPat);
+                rsrpFn = SIONNA.makeDbmFn ? SIONNA.makeDbmFn(sionnaPat) : null;
                 azDependent = true;
                 _beamTilt = 0;   // RT 예측은 세계좌표 기준 → 틸트/스윙 중복 적용 방지
                 _beamSwing = 0;
@@ -872,7 +869,32 @@ function prefillDefaultBs() {
         // 방위각/고도각별 반경 계산 헬퍼 (진폭 비례)
         function rAt(azDeg, elDeg) {
             var g = gainFn(azDeg, elDeg);
-            return { g: g, r: scale * Math.pow(10, g / 20) };
+            var dbm = rsrpFn ? rsrpFn(azDeg, elDeg) : NaN;
+            return { g: g, dbm: dbm, r: scale * Math.pow(10, g / 20) };
+        }
+
+        function beamRsrpColor(dbm) {
+            if (isFinite(dbm) && window.RF_COLOR) return RF_COLOR.colorForDbm(dbm);
+            return "#7c3aed"; // 절대 RSRP가 없는 일반 측정 패턴은 단색 형상
+        }
+
+        // ---- 상단 절단(하부 전파 볼륨): 단말 수신 고도 평면 위는 잘라냄 ----
+        // 절단 로컬 높이 = 선택 단말 고도(최솟값) − 안테나 설치 고도 (RT 메타 기준)
+        var clipU = null, clipAltTop = null;
+        if (sionnaPat && isBeamSionnaClip() && sionnaPat.altitudes.length) {
+            clipAltTop = Math.min.apply(null, sionnaPat.altitudes);
+            var antH = 0;
+            if (window.SIONNA && SIONNA.getMeta && SIONNA.getMeta()) {
+                antH = SIONNA.getMeta().antennaHeightM || 0;
+            }
+            clipU = Math.max(1, clipAltTop - antH);
+        }
+
+        // 절단 평면 위 로컬 좌표는 원점 방향으로 평면에 프로젝션 (컷오프 + 평면 위 윤곽선)
+        function clipLocal(pe, pn, pu) {
+            if (clipU === null || pu <= clipU) return { e: pe, n: pn, u: pu };
+            var f = clipU / pu;
+            return { e: pe * f, n: pn * f, u: clipU };
         }
 
         // ---- 고도각 테이블 (자오선 공용) ----
@@ -894,14 +916,21 @@ function prefillDefaultBs() {
             var arad = meridAz * Math.PI / 180;
             var cAz = Math.cos(arad), sAz = Math.sin(arad);
             var positions = [];
+            var prevFinite = true;
             for (var ie = 0; ie <= 36; ie++) {
                 var t5 = rAt(meridAz, -90 + ie * 5);
-                positions.push(localToCartesian(
+                if (!isFinite(t5.g)) {          // 결측 구간: 선을 끊어 구멍 처리
+                    prevFinite = false;
+                    continue;
+                }
+                if (!prevFinite) { positions = []; prevFinite = true; }
+                var mp = clipLocal(
                     t5.r * elTable[ie].cosE * cAz,
                     t5.r * elTable[ie].cosE * sAz,
-                    t5.r * elTable[ie].sinE));
+                    t5.r * elTable[ie].sinE);
+                positions.push(localToCartesian(mp.e, mp.n, mp.u));
             }
-            addBeamPolyline(positions, "#94a3b8", 0.6, 1.5);
+            if (positions.length >= 2) addBeamPolyline(positions, "#94a3b8", 0.6, 1.5);
         }
         for (var ir = 2; ir <= 34; ir += 2) {   // el = -80..80 step 10
             var elV = -90 + ir * 5;
@@ -910,39 +939,52 @@ function prefillDefaultBs() {
                 // RT 예측(방위 의존): 링을 30° 세그먼트로 나눠 각각 이득에 맞는 색 적용
                 for (var seg = 0; seg < 12; seg++) {
                     var aStart = seg * 6;   // 시작 스텝(1스텝=5°): 세그먼트 30° = 6스텝
-                    var ringPts = [];
+                    var run = [];           // 연속 유효 구간 [{aIdx, r}]
+                    var flushRun = function (midDbm) {   // 구간을 폴리라인으로 그리고 초기화
+                        if (run.length < 2) { run = []; return; }
+                        if (!isFinite(midDbm)) midDbm = run[Math.floor(run.length / 2)].dbm;
+                        var pts = [];
+                        for (var q = 0; q < run.length; q++) {
+                            var rq = run[q];
+                            var rp = clipLocal(
+                                rq.r * elTable[eIdx].cosE * azTable[rq.aIdx].c,
+                                rq.r * elTable[eIdx].cosE * azTable[rq.aIdx].s,
+                                rq.r * elTable[eIdx].sinE);
+                            pts.push(localToCartesian(rp.e, rp.n, rp.u));
+                        }
+                        addBeamPolyline(pts, beamRsrpColor(midDbm), 0.85, 1.5);
+                        run = [];
+                    };
                     for (var s2 = 0; s2 <= 6; s2++) {
                         var aIdx = aStart + s2;      // azTable 인덱스 (최대 72)
                         var tS = rAt(aIdx * 5, elV);
-                        ringPts.push(localToCartesian(
-                            tS.r * elTable[eIdx].cosE * azTable[aIdx].c,
-                            tS.r * elTable[eIdx].cosE * azTable[aIdx].s,
-                            tS.r * elTable[eIdx].sinE));
+                        if (!isFinite(tS.g)) {       // 결측 빈: 구간을 끊어 구멍 처리
+                            flushRun(NaN);
+                            continue;
+                        }
+                        run.push({ aIdx: aIdx, r: tS.r, g: tS.g, dbm: tS.dbm });
                     }
-                    var midG = rAt(aStart * 5 + 15, elV).g;   // 세그먼트 중앙 방위
-                    var cMid = BEAMPATTERN.jetColor(BEAMPATTERN.gainToT(midG));
-                    addBeamPolyline(ringPts,
-                        "rgb(" + cMid.r + "," + cMid.g + "," + cMid.b + ")", 0.85, 1.5);
+                    flushRun(rAt(aStart * 5 + 15, elV).dbm);   // 세그먼트 중앙 RSRP로 색 결정
                 }
             } else {
                 // 측정 옴니(방위 무관): 기존 방식 — 링 전체 단일 색
                 var tR = rAt(0, elV);
                 var ringPts2 = [];
                 for (var ia = 0; ia <= 72; ia++) {
-                    ringPts2.push(localToCartesian(
+                    var op = clipLocal(
                         tR.r * elTable[eIdx].cosE * azTable[ia].c,
                         tR.r * elTable[eIdx].cosE * azTable[ia].s,
-                        tR.r * elTable[eIdx].sinE));
+                        tR.r * elTable[eIdx].sinE);
+                    ringPts2.push(localToCartesian(op.e, op.n, op.u));
                 }
-                var tRing = BEAMPATTERN.gainToT(tR.g);
-                var cRing = BEAMPATTERN.jetColor(tRing);
-                addBeamPolyline(ringPts2, "rgb(" + cRing.r + "," + cRing.g + "," + cRing.b + ")", 0.85, 1.5);
+                addBeamPolyline(ringPts2, "#7c3aed", 0.85, 1.5);
             }
         }
-        // 수직 축선 (패턴 중심축 표시)
+        // 수직 축선 (패턴 중심축 표시 — 절단 시 평면 위쪽은 생략)
+        var axisTop = (clipU !== null) ? Math.min(scale * 1.1, clipU * 1.05) : scale * 1.1;
         addBeamPolyline([
             localToCartesian(0, 0, 0),
-            localToCartesian(0, 0, scale * 1.1)
+            localToCartesian(0, 0, axisTop)
         ], "#ffffff", 0.7, 1);
 
         // ---- 반투명 표면 (엔진이 커스텀 Primitive 미지원 시 생략) ----
@@ -951,11 +993,15 @@ function prefillDefaultBs() {
                 var mesh = azDependent
                     ? BEAMPATTERN.buildPatternMeshFromGain(gainFn, scale, 15, 5)
                     : BEAMPATTERN.buildPatternMesh(scale, 15, 5);
+                var surfaceColor = sionnaPat
+                    ? Cesium.Color.WHITE.withAlpha(0.05)
+                    : Cesium.Color.fromCssColorString("#a855f7").withAlpha(0.12);
                 var flats = [];
                 var cartesians = [];
                 for (var i = 0; i < mesh.positions.length; i++) {
                     var lp = mesh.positions[i];
-                    var cp = localToCartesian(lp.e, lp.n, lp.u);
+                    var lpC = clipLocal(lp.e, lp.n, lp.u);   // 상단 절단 프로젝션
+                    var cp = localToCartesian(lpC.e, lpC.n, lpC.u);
                     cartesians.push(cp);
                     flats.push(cp.x, cp.y, cp.z);
                 }
@@ -978,7 +1024,7 @@ function prefillDefaultBs() {
                         geometry: geometry,
                         attributes: {
                             color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-                                Cesium.Color.CYAN.withAlpha(0.12))
+                                surfaceColor)
                         }
                     }),
                     appearance: new Cesium.PerInstanceColorAppearance({
@@ -994,22 +1040,108 @@ function prefillDefaultBs() {
             }
         }
 
+        // ---- 절단면(Cap) 뚜껑: 단말 고도 평면과 만나는 영역을 이득 색 부채꼴로 덮음 ----
+        if (clipU !== null && !beamSurfaceUnsupported) {
+            try {
+                // 방위별(5°)로 패턴 선이 절단 평면을 뚫고 나가는 최외곽 교차 반경과 이득
+                var crossings = [];
+                for (var ic = 0; ic < 72; ic++) {
+                    var azD = ic * 5;
+                    var best = 0, gBest = NaN, dbmBest = NaN;
+                    var prevPu = null, prevHz = 0, prevG = NaN, prevDbm = NaN;
+                    for (var je = 0; je <= 36; je++) {
+                        var tX = rAt(azD, -90 + je * 5);
+                        if (!isFinite(tX.g)) { prevPu = null; continue; }
+                        var pu = tX.r * elTable[je].sinE;
+                        var hz = tX.r * elTable[je].cosE;
+                        if (pu > clipU) {
+                            if (prevPu !== null && prevPu <= clipU) {
+                                // 인접 정점 사이 평면 통과 지점 보간
+                                var fc = (clipU - prevPu) / (pu - prevPu);
+                                var rcI = prevHz + fc * (hz - prevHz);
+                                if (rcI > best) {
+                                    best = rcI;
+                                    gBest = prevG + fc * (tX.g - prevG);
+                                    dbmBest = prevDbm + fc * (tX.dbm - prevDbm);
+                                }
+                            }
+                            var rcP = hz * clipU / pu;   // 평면 투영 반경
+                            if (rcP > best) { best = rcP; gBest = tX.g; dbmBest = tX.dbm; }
+                        }
+                        prevPu = pu; prevHz = hz; prevG = tX.g; prevDbm = tX.dbm;
+                    }
+                    crossings.push(best > 0
+                        ? { rc: best, g: gBest, dbm: dbmBest, azRad: azD * Math.PI / 180 } : null);
+                }
+                var capInstances = [];
+                for (ic = 0; ic < 72; ic++) {
+                    var c0 = crossings[ic], c1 = crossings[(ic + 1) % 72];
+                    if (!c0 || !c1) continue;
+                    var dbmMid2 = (c0.dbm + c1.dbm) / 2;
+                    var cM2 = (window.RF_COLOR && isFinite(dbmMid2))
+                        ? RF_COLOR.rgb255(dbmMid2) : { r: 124, g: 58, b: 237 };
+                    var center = localToCartesian(0, 0, clipU);
+                    var p0 = localToCartesian(c0.rc * Math.cos(c0.azRad),
+                                              c0.rc * Math.sin(c0.azRad), clipU);
+                    var p1 = localToCartesian(c1.rc * Math.cos(c1.azRad),
+                                              c1.rc * Math.sin(c1.azRad), clipU);
+                    capInstances.push(new Cesium.GeometryInstance({
+                        geometry: new Cesium.Geometry({
+                            attributes: {
+                                position: new Cesium.GeometryAttribute({
+                                    componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+                                    componentsPerAttribute: 3,
+                                    values: [center.x, center.y, center.z,
+                                             p0.x, p0.y, p0.z, p1.x, p1.y, p1.z]
+                                })
+                            },
+                            indices: [0, 1, 2],
+                            primitiveType: Cesium.PrimitiveType.TRIANGLES,
+                            boundingSphere: Cesium.BoundingSphere.fromPoints([center, p0, p1])
+                        }),
+                        attributes: {
+                            color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+                                new Cesium.Color(cM2.r / 255, cM2.g / 255, cM2.b / 255, 0.45))
+                        }
+                    }));
+                }
+                if (capInstances.length) {
+                    beamCapPrimitive = new Cesium.Primitive({
+                        geometryInstances: capInstances,
+                        appearance: new Cesium.PerInstanceColorAppearance({
+                            flat: true,
+                            translucent: true
+                        }),
+                        asynchronous: false
+                    });
+                    viewer.scene.primitives.add(beamCapPrimitive);
+                }
+            } catch (eCap) {
+                console.error("[BEAM] 절단면(Cap) 렌더링 실패", eCap);
+            }
+        }
+
         beamVisible = true;
         var btn = $("btn-beam");
         if (btn) btn.classList.add("active");
         var msg;
         if (sionnaPat) {
-            msg = "빔패턴 표시 [Sionna RT 예측 기반]: 크기 " + scale + "m · 고도 " +
+            msg = "기존 3D 방향성 표시 [커버리지 결과 기반]: 표시배율 " + scale + "m · 수신 고도 " +
                   sionnaPat.altitudes.join("/") + "m (" + sionnaPat.sampleCount +
-                  "점 · 예측범위 " + sionnaPat.sourceMinDbm + "~" + sionnaPat.sourceMaxDbm + "dBm)";
+                  "점 · 예측범위 " + sionnaPat.sourceMinDbm + "~" + sionnaPat.sourceMaxDbm + "dBm" +
+                  " · " + (sionnaPat.fill ? "보간 채움" : "샘플 영역만") +
+                  " · " + (sionnaPat.norm === "global" ? "공통 정규화" : "고도별 정규화") + ")";
+            if (clipU !== null) {
+                msg += " · 하부 전파 볼륨(상단 절단 @ 단말 고도 " + clipAltTop + "m)";
+            }
         } else {
-            msg = "빔패턴 표시: 크기 " + scale + "m · 900MHz 옴니 (수평 최대 0dB, 천정/저중 −30dB)";
+            msg = "기존 3D 방향성 표시 [레거시 V-Plane]: 표시배율 " + scale + "m · 900MHz 옴니 가정";
             var tilt = getBeamTilt(), swing = getBeamSwing();
             if (tilt) msg += " · 틸트 " + tilt + "°";
             if (tilt || swing) msg += " · 스윙 " + swing + "°";
         }
         if (isBeamSionnaChecked() && window.SIONNA && SIONNA.hasData() && !sionnaPat) {
-            msg += " · Sionna 패턴 추출 실패(측정 패턴으로 표시)";
+            msg += " · 커버리지 방향성 추출 실패(레거시 V-Plane 형상으로 표시)";
         }
         if (beamSurfaceUnsupported) msg += " · 표면 렌더링 미지원(와이어프레임만)";
         setStatus(msg);
@@ -1020,6 +1152,9 @@ function prefillDefaultBs() {
         if (beamPrimitive && viewer) {
             try { viewer.scene.primitives.remove(beamPrimitive); } catch (e) {}
         }
+        if (beamCapPrimitive && viewer) {
+            try { viewer.scene.primitives.remove(beamCapPrimitive); } catch (e) {}
+        }
         if (viewer) {
             for (var i = 0; i < beamEntities.length; i++) {
                 try { viewer.entities.remove(beamEntities[i]); } catch (e) {}
@@ -1027,6 +1162,7 @@ function prefillDefaultBs() {
         }
         beamEntities = [];
         beamPrimitive = null;
+        beamCapPrimitive = null;
         beamVisible = false;
         txRefForBeam = null;
         var btn = $("btn-beam");
@@ -1035,10 +1171,10 @@ function prefillDefaultBs() {
 
     function toggleBeam() {
         if (!ready || !getViewer()) { setStatus("지도 준비 중...", true); return; }
-        if (!window.BEAMPATTERN) { setStatus("빔패턴 모듈(beampattern.js)을 찾을 수 없습니다.", true); return; }
+        if (!window.BEAMPATTERN) { setStatus("기존 방향성 모듈(beampattern.js)을 찾을 수 없습니다.", true); return; }
         if (beamVisible) {
             clearBeam();
-            setStatus("빔패턴 숨김");
+            setStatus("기존 3D 방향성 형상 숨김");
             return;
         }
         // Sionna 예측 기반 모드인데 결과 미로드 시: 먼저 로드 후 렌더
@@ -1046,8 +1182,8 @@ function prefillDefaultBs() {
             setStatus("Sionna RT 예측 결과를 로드하는 중...");
             ensureBeamSionnaData(function (err, d) {
                 if (err || !d) {
-                    setStatus("Sionna 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음") +
-                              " — 측정 패턴으로 표시하려면 체크를 해제하세요.", true);
+                    setStatus("선택한 커버리지 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음") +
+                              " — 레거시 V-Plane 형상을 보려면 체크를 해제하세요.", true);
                     return;
                 }
                 populateBeamSionnaAlts(d);
@@ -1098,7 +1234,7 @@ function prefillDefaultBs() {
 
     function compareAltitudes() {
         if (!points.length) { setStatus("먼저 CSV를 업로드하세요.", true); return; }
-        if (!window.BEAMPATTERN) { setStatus("빔패턴 모듈을 찾을 수 없습니다.", true); return; }
+        if (!window.BEAMPATTERN) { setStatus("안테나 패턴 모듈을 찾을 수 없습니다.", true); return; }
         var ref = getTxRef();
         if (!ref) { setStatus("기준점을 찾을 수 없습니다.", true); return; }
         var calib = calibrateModel(ref, points);
@@ -1146,13 +1282,11 @@ function prefillDefaultBs() {
         box.innerHTML = html;
         setStatus("단말 고도별 커버리지 비교 완료: " + ALT_COMPARE_LIST.join("/") + "m");
     }
-    return { flyTo: flyTo, moveTo: moveTo };
+    return {
+        flyTo: flyTo,
+        moveTo: moveTo,
+        clearPrediction: clearPrediction,
+        clearBeam: clearBeam,
+        getTxRef: getTxRef
+    };
 })();
-
-
-
-
-
-
-
-

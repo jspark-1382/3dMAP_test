@@ -51,9 +51,13 @@ Idx, CID_1, Time, [LTE][L1][RF]PCI, [LTE][L1][RF]RSRP (dBm)(dBm), [General][GPS]
 - [x] 각 좌표로 카메라 이동(`camera.flyTo`) + 마커 표시
 - [x] 좌표 목록 클릭 이동 / 첫·이전·다음·마지막·홈 버튼
 - [x] 원본/보정 고도, 시간, RSRP 부가정보 표시
-- [x] 안테나 빔패턴 3D 반투명 표시 — 측정 옴니 패턴 또는
-  **Sionna RT 예측 기반 패턴**(체크박스 선택, `Data/sionna/sionna_coverage.json`의
-  격자점을 방위각×고도각 5° 빈으로 집계해 최대 0dB 정규화)
+- [x] 안테나 고유 방사 패턴 — 측정 H-Plane/V-Plane을 합성한 상대이득 3D 형상
+- [x] Sionna 고도면 적층 보기 — 고도별 실제 계산 셀 중 설정한 RSRP 기준 이상만
+  색상점·임계 경계·고도 연결선으로 독립 표시(기본 -100dBm)
+- [x] Sionna -100dBm 연속 3D 경계면 — 별도 320km×320km·고도 40km Sionna
+  계산에서 수평/상단 경계 안에 닫힌 등가면 메시 추출
+- [x] 기존 3D 방향성 표시 — 레거시 V-Plane 형상 또는 선택한 커버리지 결과를
+  방위각×고도각 5° 빈으로 변환한 분석용 형상(안테나 고유 패턴과 구분)
 
 ## 파일 구조
 
@@ -62,18 +66,27 @@ index.html            # UI
 css/style.css         # 스타일
 js/config.js          # VWORLD API 키/서버 설정
 js/csv.js             # CSV 파서
+js/rfcolor.js         # CSV·일반 예측·Sionna 공통 RSRP 색상/범례
+js/radiationpattern.js # 측정 H/V 안테나 고유 방사 패턴 표시
+js/coveragevolume.js  # Sionna RSRP 임계값 기반 3D 수신 가능 볼륨
+js/coverageisosurface.js # 별도 Sionna 계산의 -100dBm 연속 3D 등가면
 js/main.js            # VWORLD 3D(webglMapInit) + 지도 + CSV 연동
 sample/drone_data.csv # 테스트용 CSV
 test/test_csv.js      # CSV 파서 Node 검증
+test/test_coveragevolume.js # 3D 볼륨 격자/경계 판정 검증
 js/sionna.js          # Sionna RT 커버리지 표시 모듈
 python/run_coverage.py # Sionna RT 예측 실행 스크립트 (python/ 폴더 참고)
+python/run_coverage_volume_3d.py # 넓은 3D 격자 계산과 임계 등가면 추출
+python/export_antenna_pattern.py # 브라우저용 측정 H/V 패턴 JSON 생성
 ```
 
 ## Sionna RT 커버리지 예측 (선택)
 
 측정 안테나 패턴(`Data/pattern/OM900_pattern_1.csv`, 910MHz)을 적용해
 기지국(34°36'45.7"N 127°12'21.5"E) 주변의 수신 전력을 레이트레이싱으로 예측하고,
-단말 고도 100~500m 구간별 커버리지를 지도 위에 표시합니다.
+단말 고도 100~2000m 구간별 커버리지를 지도 위에 표시합니다. 동일한 Sionna RT 설정에서
+지면 정반사만 끈 자유공간 직접파 결과도 함께 생성해 동일 셀의 절대 RSRP를 비교할 수 있습니다.
+Sionna가 필요 없는 Friis 수식 결과(`python/formula_pathloss.py`)도 별도로 제공합니다.
 
 ```bash
 # 최초 1회: Python 3.11 가상환경에 Sionna 설치 (시스템 기본 python 버전과 무관)
@@ -83,12 +96,20 @@ py -3.11 -m venv .venv-sionna
 # 시뮬레이션 실행 (--quick: 저해상도 빠른 검증)
 .venv-sionna\Scripts\python python\run_coverage.py
 
-# 서버 실행 후 브라우저에서 "Sionna RT 예측" 섹션의 [Sionna 결과 로드] 클릭
+# 자유공간 비교 결과만 다시 생성
+.venv-sionna\Scripts\python python\run_coverage.py --free-space-only
+
+# Sionna 없이 Friis 수식 Pathloss 결과만 생성
+python python\formula_pathloss.py
+
+# 서버 실행 후 "전파 환경"을 선택하거나 [두 환경 수치 비교] 클릭
 python -m http.server 8000
 ```
 
 - 기지국 좌표·안테나 고도·TX 전력·격자 해상도 등은 `python/sionna_config.py`에서 수정
-- 결과는 `Data/sionna/sionna_coverage.json`으로 저장되며 `js/sionna.js`가 로드
+- 평탄 지면 결과는 `Data/sionna/sionna_coverage.json`, 자유공간 결과는
+  `Data/sionna/sionna_free_space.json`, 수식 결과는 `Data/sionna/formula_pathloss.json`으로
+  저장되며 `js/sionna.js`가 로드
 
 ## 주의
 

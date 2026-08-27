@@ -209,5 +209,44 @@ test("buildPatternMeshFromGain: 방위 의존 함수가 반경에 반영됨", fu
     assert.strictEqual(pw.gainDb, -20);
 });
 
+// ---------- beamColor / BEAM_BINS (RSRP 색상 구분 옵션) ----------
+test("beamColor: 양끝값 (t=0 남색, t=1 핑크)", function () {
+    var lo = BP.beamColor(0), hi = BP.beamColor(1);
+    assert.ok(lo.b > 200 && lo.r < 100, "t=0 남색: " + JSON.stringify(lo));
+    assert.ok(hi.r > 200 && hi.g > 80 && hi.b > 150, "t=1 핑크: " + JSON.stringify(hi));
+});
+test("beamColor: 범위 클램프 및 단조성", function () {
+    assert.deepStrictEqual(BP.beamColor(-5), BP.beamColor(0));
+    assert.deepStrictEqual(BP.beamColor(5), BP.beamColor(1));
+    var prev = BP.beamColor(0);
+    for (var t = 0.1; t <= 1.001; t += 0.1) {
+        var c = BP.beamColor(t);
+        assert.ok(c.r >= prev.r, "r 단조 증가 t=" + t);
+        prev = c;
+    }
+});
+test("BEAM_BINS: 5dB 단위 7개 bin, 0dB~−30dB 이하 전체 커버", function () {
+    assert.strictEqual(BP.BEAM_BINS.length, 7);
+    assert.strictEqual(BP.BEAM_BINS[0].hi, 0);
+    assert.strictEqual(BP.BEAM_BINS[BP.BEAM_BINS.length - 1].lo, -Infinity);
+    for (var i = 0; i < BP.BEAM_BINS.length - 1; i++) {
+        assert.strictEqual(BP.BEAM_BINS[i].lo, BP.BEAM_BINS[i + 1].hi, "bin 경계 연속성 i=" + i);
+        assert.ok(/^#[0-9a-f]{6}$/i.test(BP.BEAM_BINS[i].color), "색상 형식 i=" + i);
+    }
+});
+test("BEAM_BINS: 대표 이득값이 올바른 bin에 매핑됨", function () {
+    function binFor(g) {
+        for (var i = 0; i < BP.BEAM_BINS.length; i++) {
+            var b = BP.BEAM_BINS[i];
+            if (g <= b.hi && g > b.lo) return b;
+        }
+        return BP.BEAM_BINS[BP.BEAM_BINS.length - 1];
+    }
+    assert.strictEqual(binFor(0).color, "#f472b6");      // 최대 강
+    assert.strictEqual(binFor(-7.5).color, "#e879f9");
+    assert.strictEqual(binFor(-30).color, "#4f46e5");    // 최약
+    assert.strictEqual(binFor(-60).color, "#4f46e5");    // RT 결측 클램프 영역
+});
+
 console.log("\n" + passed + " passed, " + failed + " failed");
 if (failed > 0) process.exit(1);
