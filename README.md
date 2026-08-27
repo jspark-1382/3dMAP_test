@@ -52,6 +52,11 @@ Idx, CID_1, Time, [LTE][L1][RF]PCI, [LTE][L1][RF]RSRP (dBm)(dBm), [General][GPS]
 - [x] 좌표 목록 클릭 이동 / 첫·이전·다음·마지막·홈 버튼
 - [x] 원본/보정 고도, 시간, RSRP 부가정보 표시
 - [x] 안테나 고유 방사 패턴 — 측정 H-Plane/V-Plane을 합성한 상대이득 3D 형상
+- [x] 독립 방사 패턴 분석기 — 옴니/야기/합성 H·V 극좌표와 회전 가능한 전체 3D 형상,
+  위에서 원형·옆에서 도넛형인 이상적 옴니 기준과 구형 등방성 기준 비교, 약한 부분 표시 범위 조절
+- [x] 가변 Friis 3D 경계면 — RSRP 기준(-130~-40dBm)과 측정/이상적 안테나 패턴을 선택해
+  브라우저에서 자유공간 경계면 재계산, 지도 방위축을 북 0°·동 90°로 통일
+  dB 가시화/진폭/전력 반경 비교(커버리지·지면 절단과 분리)
 - [x] Sionna 고도면 적층 보기 — 고도별 실제 계산 셀 중 설정한 RSRP 기준 이상만
   색상점·임계 경계·고도 연결선으로 독립 표시(기본 -100dBm)
 - [x] Sionna/Friis -100dBm 연속 3D 경계면 — 두 모델 동시 표시와 고도별 최단거리 비교표
@@ -81,6 +86,7 @@ python/run_coverage.py # Sionna RT 예측 실행 스크립트 (python/ 폴더 �
 python/formula_coverage_surface_3d.py # Friis -100dBm 3D 경계면 생성
 python/run_coverage_volume_3d.py # 넓은 3D 격자 계산과 임계 등가면 추출
 python/export_antenna_pattern.py # 브라우저용 측정 H/V 패턴 JSON 생성
+python/export_antenna_pattern_catalog.py # 로컬 전용 옴니/야기/합성 분석 카탈로그 생성
 ```
 
 ## Sionna RT 커버리지 예측 (선택)
@@ -90,6 +96,9 @@ python/export_antenna_pattern.py # 브라우저용 측정 H/V 패턴 JSON 생성
 단말 고도 100~2000m 구간별 커버리지를 지도 위에 표시합니다. 동일한 Sionna RT 설정에서
 지면 정반사만 끈 자유공간 직접파 결과도 함께 생성해 동일 셀의 절대 RSRP를 비교할 수 있습니다.
 Sionna가 필요 없는 Friis 수식 결과(`python/formula_pathloss.py`)도 별도로 제공합니다.
+
+원본 Excel 패턴과 `Data/sionna/antenna_pattern_catalog.json`은 공개 저장소에 올리지 않습니다.
+로컬에서 패턴 분석기를 사용하기 전에 카탈로그를 생성합니다.
 
 ```bash
 # 최초 1회: Python 3.11 가상환경에 Sionna 설치 (시스템 기본 python 버전과 무관)
@@ -104,6 +113,9 @@ py -3.11 -m venv .venv-sionna
 
 # Sionna 없이 Friis 수식 Pathloss 결과만 생성
 python python\formula_pathloss.py
+
+# 로컬 전용 옴니/야기/합성 방사 패턴 분석 데이터 생성
+python python\export_antenna_pattern_catalog.py
 
 # 서버 실행 후 "전파 환경"을 선택하거나 [두 환경 수치 비교] 클릭
 python -m http.server 8000

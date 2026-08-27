@@ -36,6 +36,11 @@ DEFAULT_PATTERN_PATH = os.path.join(
 )
 DEFAULT_PATTERN_SHEET = "야기+옴니"
 DEFAULT_PATTERN_MODEL = "이중 야기 + 옴니 (260827)"
+PATTERN_MODELS = {
+    "야기안테나": "야기 안테나 (260827)",
+    "옴니": "옴니 안테나 (260827)",
+    "야기+옴니": DEFAULT_PATTERN_MODEL,
+}
 
 FREQ_BANDS = {
     "910": {"horizontal_col": 1, "vertical_col": 2},
@@ -83,7 +88,7 @@ def _read_xlsx_pattern(path: str, sheet_name: str = DEFAULT_PATTERN_SHEET):
                 entries[float(angle)] = (float(horizontal), float(vertical))
             except (TypeError, ValueError):
                 continue
-        return DEFAULT_PATTERN_MODEL, entries
+        return PATTERN_MODELS.get(sheet_name, sheet_name), entries
     finally:
         workbook.close()
 
@@ -117,7 +122,11 @@ def _power_average_db(values_db):
     return float(10.0 * np.log10(np.mean(p)))
 
 
-def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
+def load_pattern(
+    path: str | None = None,
+    freq: str = "910",
+    sheet_name: str = DEFAULT_PATTERN_SHEET,
+) -> Dict:
     if path is None:
         path = DEFAULT_PATTERN_PATH
 
@@ -131,7 +140,7 @@ def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
     absolute_path = os.path.abspath(path)
     is_xlsx = os.path.splitext(absolute_path)[1].lower() in (".xlsx", ".xlsm")
     if is_xlsx:
-        model, entries = _read_xlsx_pattern(absolute_path)
+        model, entries = _read_xlsx_pattern(absolute_path, sheet_name=sheet_name)
     else:
         model, entries = _read_csv_pattern(absolute_path, freq)
 
@@ -220,7 +229,7 @@ def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
         "freq_mhz": int(freq),
         "configuration": "dual Yagi + omni",
         "source_file": os.path.basename(absolute_path),
-        "source_sheet": DEFAULT_PATTERN_SHEET if is_xlsx else None,
+        "source_sheet": sheet_name if is_xlsx else None,
 
         "raw_angle_deg": raw_angles.tolist(),
         "raw_horizontal_gain_dbi": horizontal_db.tolist(),

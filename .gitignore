@@ -13,5 +13,6 @@ __pycache__/
 Data/pattern/*.xlsx
 Data/pattern/~$*
 Data/sionna/antenna_pattern.json
+Data/sionna/antenna_pattern_catalog.json
 python/backup/
 

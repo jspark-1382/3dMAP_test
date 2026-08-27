@@ -99,8 +99,9 @@ def build_surface(pattern, threshold_dbm=-100.0, az_step_deg=3.0, theta_step_deg
         theta_rad = np.radians(thetas)
         phi_rad = math.radians(phi_deg)
         horizontal = distance * np.sin(theta_rad)
-        east = horizontal * math.cos(phi_rad)
-        north = horizontal * math.sin(phi_rad)
+        # 지도/브라우저 공통 방위축: 북쪽 0도, 동쪽 90도(시계방향)
+        east = horizontal * math.sin(phi_rad)
+        north = horizontal * math.cos(phi_rad)
         up = float(CFG.BS_ALT_M) + distance * np.cos(theta_rad)
         vertices.append(np.column_stack((east, north, up)))
 
@@ -150,6 +151,7 @@ def build_surface(pattern, threshold_dbm=-100.0, az_step_deg=3.0, theta_step_deg
             "thresholdDbm": float(threshold_dbm),
             "azimuthStepDeg": float(az_step_deg),
             "thetaStepDeg": float(theta_step_deg),
+            "azimuthConvention": "0°=North, 90°=East (clockwise)",
             "bs": {"lat": bs_lat, "lon": bs_lon},
             "antennaHeightM": CFG.BS_ALT_M,
             "triangleCount": len(triangles),

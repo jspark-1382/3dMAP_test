@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>브이월드 3D 지도 - CSV 좌표 이동</title>
-    <link rel="stylesheet" href="css/style.css?v=9" />
+    <link rel="stylesheet" href="css/style.css?v=13" />
     <script type="text/javascript" src="js/config.js?v=2"></script>
     <script type="text/javascript">
       (function () {
@@ -19,11 +19,11 @@
     <script type="text/javascript" src="js/rfcolor.js?v=4"></script>
     <script type="text/javascript" src="js/beampattern.js?v=10"></script>
     <script type="text/javascript" src="js/main.js?v=19"></script>
-    <script type="text/javascript" src="js/radiationpattern.js?v=10"></script>
+    <script type="text/javascript" src="js/radiationpattern.js?v=13"></script>
     <script type="text/javascript" src="js/sionna.js?v=22"></script>
     <script type="text/javascript" src="js/coveragevolume.js?v=2"></script>
     <script type="text/javascript" src="js/coverageisosurface.js?v=3"></script>
-    <script type="text/javascript" src="js/friisisosurface.js?v=2"></script>
+    <script type="text/javascript" src="js/friisisosurface.js?v=3"></script>
     <script type="text/javascript" src="js/coveragecomparison.js?v=2"></script>
     <script type="text/javascript" src="js/help.js?v=1"></script>
     <style>
@@ -166,8 +166,20 @@
 
         <div class="beam-section coverage-surface-section">
             <div class="section-title section-title-help">
-                <span>🌐 -100dBm 연속 3D 커버리지 경계면</span>
-                <button type="button" class="help-btn" data-help="help-coverage-surface" data-help-title="Sionna/Friis -100dBm 3D 커버리지 경계면">ⓘ 설명</button>
+                <span>🌐 연속 3D 커버리지 경계면</span>
+                <button type="button" class="help-btn" data-help="help-coverage-surface" data-help-title="Sionna/Friis 3D 커버리지 경계면">ⓘ 설명</button>
+            </div>
+            <div class="tx-row coverage-surface-friis-controls">
+                <span class="tx-label">Friis 기준</span>
+                <input id="friis-surface-threshold" type="number" class="tx-inp" value="-100" min="-130" max="-40" step="5" aria-label="Friis RSRP 기준" />
+                <span class="tx-label">dBm</span>
+                <select id="friis-surface-pattern" class="tx-inp" aria-label="Friis 안테나 패턴">
+                    <option value="combined">측정 야기 + 옴니</option>
+                    <option value="omni">측정 옴니</option>
+                    <option value="idealOmni">이상적 옴니 (수평 원형)</option>
+                    <option value="yagi">측정 야기</option>
+                    <option value="isotropic">이상적 등방성 (구형)</option>
+                </select>
             </div>
             <div class="surface-model-buttons">
                 <button id="btn-coverage-surface" class="tx-btn surface-sionna-btn">Sionna RT 표시</button>
@@ -181,7 +193,7 @@
             </div>
             <div id="coverage-surface-summary" class="coverage-volume-summary"></div>
             <div id="friis-coverage-surface-summary" class="coverage-volume-summary"></div>
-            <button id="btn-coverage-distance-table" class="tx-btn distance-table-btn">고도별 최단 거리 표</button>
+            <button id="btn-coverage-distance-table" class="tx-btn distance-table-btn">-100dBm 고도별 최단 거리 표</button>
             <div id="coverage-distance-result"></div>
         </div>
 
@@ -212,11 +224,35 @@
 
         <div class="beam-section">
             <div class="section-title section-title-help">
-                <span>📡 이중 야기 + 옴니 방사 패턴</span>
+                <span>📡 안테나 방사 패턴 분석</span>
                 <button type="button" class="help-btn" data-help="help-radiation" data-help-title="안테나 고유 방사 패턴">ⓘ 설명</button>
             </div>
             <div class="tx-row">
-                <button id="btn-radiation" class="tx-btn">고유 방사 패턴 표시</button>
+                <span class="tx-label">패턴</span>
+                <select id="radiation-pattern-source" class="tx-inp radiation-select">
+                    <option value="combined">이중 야기 + 옴니</option>
+                    <option value="idealOmni">이상적 옴니 기준 (도넛형)</option>
+                    <option value="isotropic">이상적 등방성 기준</option>
+                </select>
+            </div>
+            <div class="tx-row">
+                <span class="tx-label">반경 표시</span>
+                <select id="radiation-radius-mode" class="tx-inp radiation-select">
+                    <option value="db" selected>dB 가시화 (로브 강조)</option>
+                    <option value="amplitude">실제 진폭 비례</option>
+                    <option value="power">실제 전력 비례</option>
+                </select>
+            </div>
+            <div class="tx-row radiation-action-row">
+                <button id="btn-radiation-analyzer" class="tx-btn">2D/3D 패턴 분석 보기</button>
+                <button id="btn-radiation" class="tx-btn tx-btn-secondary">지도 3D 표시</button>
+            </div>
+            <div class="tx-row">
+                <span class="tx-label">약한 부분 표시</span>
+                <input type="range" id="radiation-db-floor" min="-60" max="-20" step="5" value="-40" />
+                <span id="radiation-db-floor-val" class="tx-label">보통 (-40dB)</span>
+            </div>
+            <div class="tx-row">
                 <input type="range" id="radiation-scale" min="50" max="1000" step="50" value="300" />
                 <span id="radiation-scale-val" class="tx-label">300m</span>
             </div>
@@ -326,13 +362,78 @@
         <p>세 환경 결과는 모두 같은 절대 RSRP(dBm) 색상 범례를 사용하므로 수신전력 차이를 직접 비교할 수 있습니다.</p>
     </div>
     <div id="help-radiation" class="help-source" hidden>
-        <p><code>Data/pattern/260827_pattern.xlsx</code>의 <strong>야기+옴니</strong> 시트에 있는 이중 야기 + 옴니 H-Plane/V-Plane을 합성한 3차원 상대 방사 패턴입니다.</p>
+        <p><strong>2D/3D 패턴 분석 보기</strong>는 커버리지 계산과 분리된 안테나 상대이득 전용 화면입니다. 옴니·야기·합성 패턴의 H-Plane/V-Plane을 극좌표로 보고, 지면에서 자르지 않은 전체 3D 형상을 회전해 확인합니다.</p>
+        <p><code>Data/pattern/260827_pattern.xlsx</code>의 <strong>옴니</strong>, <strong>야기안테나</strong>, <strong>야기+옴니</strong> 시트를 로컬 패턴 카탈로그로 변환해 사용합니다. 원본과 카탈로그는 Git에 업로드하지 않습니다.</p>
         <p><strong>상대이득 0dB</strong>가 가장 강한 방향이며, 음수 값이 작아질수록 그 방향의 방사가 약합니다. 이 값은 RSRP가 아닙니다.</p>
-        <p>수신 고도·거리손실·지면 반사는 사용하지 않습니다. 크기 슬라이더는 실제 도달거리가 아닌 지도에서 보기 위한 표시 배율입니다.</p>
+        <p><strong>dB 가시화</strong>는 작은 부엽도 보이게 반경을 극좌표처럼 표시합니다. 진폭/전력 비례는 물리적인 상대 크기에 가깝지만 약한 로브가 매우 작게 보일 수 있습니다.</p>
+        <p><strong>약한 부분 표시</strong>는 측정값을 변경하지 않고, 약한 로브를 화면에서 어디까지 보일지 정합니다. −20dB는 강한 부분 위주, −60dB는 약한 부분까지 표시합니다.</p>
+        <p><strong>이상적 옴니 기준(도넛형)</strong>은 모든 수평 방위가 같고 위·아래가 약한 이론적 기준입니다. 위에서 보면 원형, 옆에서 보면 도넛 단면으로 보입니다. <strong>이상적 등방성 기준</strong>은 3차원 모든 방향이 같은 구형입니다.</p>
+        <p>수신 고도·거리손실·지면 반사·-100dBm 기준은 사용하지 않습니다. 지도 크기 슬라이더는 실제 도달거리가 아닌 표시 배율입니다.</p>
+    </div>
+
+    <div id="pattern-analyzer-modal" class="pattern-analyzer-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pattern-analyzer-title">
+        <div class="pattern-analyzer-dialog" role="document">
+            <div class="pattern-analyzer-head">
+                <div>
+                    <h2 id="pattern-analyzer-title">안테나 방사 패턴 분석</h2>
+                    <p>커버리지·Friis·RSRP와 분리된 상대이득 전용 표시</p>
+                </div>
+                <div class="pattern-analyzer-head-actions">
+                    <button type="button" id="btn-pattern-shape-analysis" class="pattern-shape-analysis-btn" aria-expanded="false" aria-controls="pattern-shape-explainer">형상 해석 보기</button>
+                    <button type="button" id="btn-pattern-analyzer-close" class="pattern-analyzer-close" aria-label="닫기">×</button>
+                </div>
+            </div>
+            <div class="pattern-analyzer-toolbar">
+                <label>패턴
+                    <select id="pattern-analyzer-source">
+                        <option value="combined">이중 야기 + 옴니</option>
+                    </select>
+                </label>
+                <label>반경
+                    <select id="pattern-analyzer-mode">
+                        <option value="db">dB 가시화</option>
+                        <option value="amplitude">진폭 비례</option>
+                        <option value="power">전력 비례</option>
+                    </select>
+                </label>
+                <label>약한 부분 표시
+                    <input id="pattern-analyzer-floor" type="range" min="-60" max="-20" step="5" value="-40" />
+                    <span id="pattern-analyzer-floor-val">보통 (-40dB)</span>
+                </label>
+                <div class="pattern-analyzer-view-buttons">
+                    <span>3D 시점</span>
+                    <button type="button" data-pattern-view="oblique">사선</button>
+                    <button type="button" data-pattern-view="top">위에서</button>
+                    <button type="button" data-pattern-view="side">옆에서</button>
+                </div>
+            </div>
+            <div class="pattern-analyzer-grid">
+                <section class="pattern-canvas-card">
+                    <canvas id="pattern-polar-canvas" role="img" aria-label="수평과 수직 안테나 패턴 극좌표 그래프"></canvas>
+                </section>
+                <section class="pattern-canvas-card">
+                    <canvas id="pattern-3d-canvas" role="img" aria-label="회전 가능한 3차원 안테나 방사 패턴"></canvas>
+                </section>
+            </div>
+            <div id="pattern-analyzer-summary" class="pattern-analyzer-summary"></div>
+            <section id="pattern-shape-explainer" class="pattern-shape-explainer" hidden aria-label="약한 부분 표시 범위에 따른 방사 패턴 형상 해석">
+                <div class="pattern-shape-explainer-head">
+                    <div>
+                        <h3>약한 부분을 어디까지 보여줄지에 따른 형상 변화</h3>
+                        <p>실제 H-Plane 값을 같은 기준으로 비교한 결과입니다. 위 슬라이더를 움직이면 현재 그림과 수치가 즉시 바뀝니다.</p>
+                    </div>
+                    <span class="pattern-floor-badge" id="pattern-floor-badge">현재 -40dB</span>
+                </div>
+                <canvas id="pattern-floor-canvas" role="img" aria-label="약한 부분 표시 범위에 따른 수평 H-Plane 비교 그림"></canvas>
+                <div id="pattern-floor-evidence" class="pattern-floor-evidence"></div>
+            </section>
+        </div>
     </div>
     <div id="help-coverage-surface" class="help-source" hidden>
-        <p><strong>청록색 Sionna RT</strong>와 <strong>주황색 Friis 자유공간</strong>의 RSRP -100dBm 연속 경계면을 각각 또는 동시에 표시합니다.</p>
+        <p><strong>청록색 Sionna RT</strong>는 계산된 RSRP -100dBm 경계면이고, <strong>주황색 Friis 자유공간</strong>은 화면에서 선택한 RSRP 기준과 안테나 패턴으로 다시 계산한 경계면입니다.</p>
         <p>Sionna 형상은 별도 3D Radio Map 계산 결과이고, Friis 형상은 Sionna를 사용하지 않고 측정 H/V 안테나 이득과 자유공간 손실식을 역으로 풀어 방향별 임계거리를 계산한 결과입니다.</p>
+        <p><strong>Friis 기준 RSRP</strong>를 −100dBm에서 −80dBm으로 높이면 모든 방향의 경계거리가 1/10로 줄지만 방위별 거리 비율은 동일하므로 측정 패턴의 굴곡은 유지됩니다. 원형 여부는 RSRP 기준이 아니라 안테나 패턴으로 결정됩니다.</p>
+        <p><strong>이상적 옴니(수평 원형)</strong>를 선택하면 위에서 본 Friis 경계면이 원형이 됩니다. 측정 옴니는 실제 H-Plane의 방위별 편차를 그대로 반영합니다.</p>
         <p>Sionna 결과 파일의 메타데이터에 기록된 수평 범위·격자·고도 단면·ray 표본 수를 사용하며, 평탄 지면 직접파와 정반사를 포함합니다. 새 패턴으로 결과를 다시 만들면 화면 설명과 상태 표시도 그 계산 범위를 자동으로 따릅니다.</p>
         <p>계산된 3차원 RSRP 격자를 선형 전력 공간에서 연속 보간한 뒤 <strong>RSRP = -100dBm</strong> 교차면을 marching tetrahedra 방식으로 추출했습니다. 표면 안쪽이 -100dBm 이상 수신 가능 영역입니다.</p>
         <p>수평과 상단 계산 경계에서는 커버리지가 모두 닫혀 있으므로, 기존 3km 고도면 결과처럼 계산영역 끝에서 잘린 형상이 아닙니다.</p>

@@ -1,18 +1,23 @@
 // ============================================================
-// Friis 자유공간 식으로 계산한 -100dBm 연속 3D 경계면 표시
-// 기존 Sionna 등가면과 독립된 Primitive를 사용해 동시 비교할 수 있다.
+// Friis 자유공간 식의 가변 RSRP 연속 3D 경계면 표시
+//   - 북쪽 0도, 동쪽 90도 방위축을 지도 3D 방사 패턴과 공통 사용
+//   - 선택한 RSRP 기준과 안테나 패턴으로 브라우저에서 메시 재계산
 // ============================================================
 var FRIIS_ISOSURFACE = (function () {
     "use strict";
 
     var DATA_URL = "Data/sionna/friis_volume_surface.json";
-    var dataCache = null;
+    var CATALOG_URL = "Data/sionna/antenna_pattern_catalog.json";
+    var baseDataCache = null;
+    var catalogCache = null;
     var primitive = null;
     var rings = null;
     var visible = false;
     var currentBaseHeight = 0;
+    var currentData = null;
 
     function $(id) { return document.getElementById(id); }
+    function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
     function getViewer() {
         return (window.ws3d && window.ws3d.viewer) ? window.ws3d.viewer : null;
     }
@@ -22,14 +27,175 @@ var FRIIS_ISOSURFACE = (function () {
         el.textContent = message;
         el.className = isError ? "status error" : "status";
     }
-    function loadData() {
-        if (dataCache) return Promise.resolve(dataCache);
+    function selectedThreshold() {
+        var value = Number($("friis-surface-threshold") && $("friis-surface-threshold").value);
+        return isFinite(value) ? clamp(value, -130, -40) : -100;
+    }
+    function selectedPatternKey() {
+        var select = $("friis-surface-pattern");
+        return select ? select.value : "combined";
+    }
+    function loadBaseData() {
+        if (baseDataCache) return Promise.resolve(baseDataCache);
         return fetch(DATA_URL).then(function (response) {
             if (!response.ok) throw new Error("HTTP " + response.status);
             return response.json();
-        }).then(function (json) {
-            dataCache = json;
-            return json;
+        }).then(function (json) { baseDataCache = json; return json; });
+    }
+    function loadCatalog() {
+        if (catalogCache) return Promise.resolve(catalogCache);
+        return fetch(CATALOG_URL, {cache: "no-store"}).then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+        }).then(function (json) { catalogCache = json; return json; });
+    }
+    function idealIsotropicPattern() {
+        return {
+            key: "isotropic", label: "이상적 등방성 (구형)", frequencyMHz: 910,
+            maxGainDbi: 0, thetaDeg: [0, 180], vertical3dRelativeGainDb: [0, 0],
+            phiDeg: [-180, 180], horizontal3dRelativeGainDb: [0, 0]
+        };
+    }
+    function resolvePattern(catalog, key) {
+        var pattern;
+        if (key === "idealOmni" && window.RADIATION_PATTERN && RADIATION_PATTERN.idealOmniPattern) {
+            return RADIATION_PATTERN.idealOmniPattern();
+        }
+        if (key === "isotropic") return idealIsotropicPattern();
+        pattern = catalog && catalog.patterns ? catalog.patterns[key] : null;
+        if (!pattern && catalog && catalog.patterns) pattern = catalog.patterns.combined;
+        if (!pattern) throw new Error("선택한 안테나 패턴 데이터가 없습니다.");
+        pattern.key = key;
+        return pattern;
+    }
+    function boundaryDistanceM(txGainDbi, thresholdDbm, txPowerDbm, frequencyMHz) {
+        var wavelengthM = 299792458 / (Number(frequencyMHz) * 1000000);
+        var allowedPathLossDb = Number(txPowerDbm) + Number(txGainDbi) - Number(thresholdDbm);
+        return wavelengthM / (4 * Math.PI) * Math.pow(10, allowedPathLossDb / 20);
+    }
+    function thresholdScale(fromThresholdDbm, toThresholdDbm) {
+        return Math.pow(10, (Number(fromThresholdDbm) - Number(toThresholdDbm)) / 20);
+    }
+    function compassPoint(distanceM, thetaDeg, azimuthDeg, antennaHeightM) {
+        var theta = Number(thetaDeg) * Math.PI / 180;
+        var azimuth = Number(azimuthDeg) * Math.PI / 180;
+        var horizontal = Number(distanceM) * Math.sin(theta);
+        return [
+            horizontal * Math.sin(azimuth),
+            horizontal * Math.cos(azimuth),
+            Number(antennaHeightM) + Number(distanceM) * Math.cos(theta)
+        ];
+    }
+    function interpolateGroundCrossing(previous, current) {
+        var ratio = (0 - previous[2]) / (current[2] - previous[2]);
+        return [
+            previous[0] + (current[0] - previous[0]) * ratio,
+            previous[1] + (current[1] - previous[1]) * ratio,
+            0
+        ];
+    }
+    function clipTriangleAboveGround(triangle) {
+        var polygon = [];
+        var previous = triangle[triangle.length - 1];
+        var previousInside = previous[2] >= 0;
+        for (var i = 0; i < triangle.length; i++) {
+            var current = triangle[i], currentInside = current[2] >= 0;
+            if (currentInside !== previousInside) polygon.push(interpolateGroundCrossing(previous, current));
+            if (currentInside) polygon.push(current);
+            previous = current;
+            previousInside = currentInside;
+        }
+        if (polygon.length < 3) return [];
+        var result = [];
+        for (var index = 1; index < polygon.length - 1; index++) {
+            result.push([polygon[0], polygon[index], polygon[index + 1]]);
+        }
+        return result;
+    }
+    function nonDegenerate(triangle) {
+        var a = triangle[0], b = triangle[1], c = triangle[2];
+        var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+        var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+        return Math.sqrt(cx * cx + cy * cy + cz * cz) > 0.00001;
+    }
+    function flattenTriangle(triangle) {
+        var result = [];
+        for (var i = 0; i < 3; i++) {
+            result.push(Number(triangle[i][0].toFixed(3)));
+            result.push(Number(triangle[i][1].toFixed(3)));
+            result.push(Number(triangle[i][2].toFixed(3)));
+        }
+        return result;
+    }
+    function buildFormulaSurface(templateData, pattern, thresholdDbm) {
+        var templateMeta = templateData.meta || {};
+        var azimuthStep = Number(templateMeta.azimuthStepDeg) || 3;
+        var thetaStep = Number(templateMeta.thetaStepDeg) || 2;
+        var txPowerDbm = Number(templateMeta.txPowerDbm);
+        var frequencyMHz = Number(pattern.frequencyMHz || templateMeta.frequencyMHz || 910);
+        var antennaHeightM = Number(templateMeta.antennaHeightM) || 16;
+        var peakGainDbi = Number(pattern.maxGainDbi) || 0;
+        var azimuths = [], thetas = [], vertices = [], triangles = [];
+        var minimumDistance = Infinity, maximumDistance = 0, maximumAltitude = 0;
+        var azimuth, theta, azimuthIndex, thetaIndex;
+        if (!isFinite(txPowerDbm)) txPowerDbm = 21;
+        for (azimuth = -180; azimuth < 180 - 0.000001; azimuth += azimuthStep) azimuths.push(azimuth);
+        for (theta = 0; theta <= 180 + 0.000001; theta += thetaStep) thetas.push(theta);
+        for (azimuthIndex = 0; azimuthIndex < azimuths.length; azimuthIndex++) {
+            vertices[azimuthIndex] = [];
+            for (thetaIndex = 0; thetaIndex < thetas.length; thetaIndex++) {
+                var elevationDeg = 90 - thetas[thetaIndex];
+                var relativeGain = RADIATION_PATTERN.directionGain(pattern, azimuths[azimuthIndex], elevationDeg);
+                var distance = boundaryDistanceM(
+                    peakGainDbi + relativeGain, thresholdDbm, txPowerDbm, frequencyMHz
+                );
+                minimumDistance = Math.min(minimumDistance, distance);
+                maximumDistance = Math.max(maximumDistance, distance);
+                var point = compassPoint(distance, thetas[thetaIndex], azimuths[azimuthIndex], antennaHeightM);
+                maximumAltitude = Math.max(maximumAltitude, point[2]);
+                vertices[azimuthIndex][thetaIndex] = point;
+            }
+        }
+        for (azimuthIndex = 0; azimuthIndex < azimuths.length; azimuthIndex++) {
+            var nextAzimuth = (azimuthIndex + 1) % azimuths.length;
+            for (thetaIndex = 0; thetaIndex < thetas.length - 1; thetaIndex++) {
+                var candidates = [
+                    [vertices[azimuthIndex][thetaIndex], vertices[nextAzimuth][thetaIndex],
+                        vertices[azimuthIndex][thetaIndex + 1]],
+                    [vertices[azimuthIndex][thetaIndex + 1], vertices[nextAzimuth][thetaIndex],
+                        vertices[nextAzimuth][thetaIndex + 1]]
+                ];
+                for (var candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+                    var clipped = clipTriangleAboveGround(candidates[candidateIndex]);
+                    for (var clippedIndex = 0; clippedIndex < clipped.length; clippedIndex++) {
+                        if (nonDegenerate(clipped[clippedIndex])) triangles.push(flattenTriangle(clipped[clippedIndex]));
+                    }
+                }
+            }
+        }
+        return {
+            meta: {
+                tool: "Friis formula (browser analytical)", environment: "free space",
+                calculation: "analytical RSRP threshold distance by azimuth/elevation",
+                frequencyMHz: frequencyMHz, txPowerDbm: txPowerDbm,
+                antennaModel: pattern.label || pattern.model || "선택 안테나",
+                antennaMaxGainDbi: peakGainDbi, thresholdDbm: Number(thresholdDbm),
+                azimuthStepDeg: azimuthStep, thetaStepDeg: thetaStep,
+                azimuthConvention: "0°=North, 90°=East (clockwise)",
+                bs: templateMeta.bs, antennaHeightM: antennaHeightM,
+                triangleCount: triangles.length,
+                minimumBoundaryDistanceM: Number(minimumDistance.toFixed(1)),
+                maximumBoundaryDistanceM: Number(maximumDistance.toFixed(1)),
+                maximumAltitudeM: Number(maximumAltitude.toFixed(1))
+            },
+            trianglesEnuM: triangles
+        };
+    }
+    function loadDisplayData() {
+        return Promise.all([loadBaseData(), loadCatalog()]).then(function (values) {
+            var pattern = resolvePattern(values[1], selectedPatternKey());
+            return buildFormulaSurface(values[0], pattern, selectedThreshold());
         });
     }
     function resolveTerrainBase(viewer, data, callback) {
@@ -76,10 +242,8 @@ var FRIIS_ISOSURFACE = (function () {
             var triangle = triangles[i];
             for (var vertex = 0; vertex < 3; vertex++) {
                 var point = enuToCartesian(
-                    bs, baseHeight,
-                    Number(triangle[vertex * 3]),
-                    Number(triangle[vertex * 3 + 1]),
-                    Number(triangle[vertex * 3 + 2])
+                    bs, baseHeight, Number(triangle[vertex * 3]),
+                    Number(triangle[vertex * 3 + 1]), Number(triangle[vertex * 3 + 2])
                 );
                 values[cursor++] = point.x;
                 values[cursor++] = point.y;
@@ -88,22 +252,21 @@ var FRIIS_ISOSURFACE = (function () {
             }
         }
         return new Cesium.Geometry({
-            attributes: {
-                position: new Cesium.GeometryAttribute({
-                    componentDatatype: Cesium.ComponentDatatype.DOUBLE,
-                    componentsPerAttribute: 3,
-                    values: values
-                })
-            },
-            indices: indices,
-            primitiveType: Cesium.PrimitiveType.TRIANGLES,
+            attributes: { position: new Cesium.GeometryAttribute({
+                componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+                componentsPerAttribute: 3, values: values
+            })},
+            indices: indices, primitiveType: Cesium.PrimitiveType.TRIANGLES,
             boundingSphere: Cesium.BoundingSphere.fromVertices(values)
         });
     }
     function addHorizontalRings(viewer, data, baseHeight) {
-        var triangles = data.trianglesEnuM || [];
-        var bs = data.meta.bs;
-        var levels = [500, 1000, 2000, 5000, 10000];
+        var triangles = data.trianglesEnuM || [], bs = data.meta.bs;
+        var candidates = [100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+        var maximumAltitude = Number(data.meta.maximumAltitudeM) || 0, levels = [];
+        for (var levelIndex = 0; levelIndex < candidates.length; levelIndex++) {
+            if (candidates[levelIndex] < maximumAltitude) levels.push(candidates[levelIndex]);
+        }
         var collection = viewer.scene.primitives.add(new Cesium.PolylineCollection());
         var material = Cesium.Material.fromType("Color", {
             color: Cesium.Color.fromCssColorString("#fb923c").withAlpha(0.82)
@@ -114,13 +277,11 @@ var FRIIS_ISOSURFACE = (function () {
             var ratio = (level - za) / (zb - za);
             if (ratio < 0 || ratio > 1) return null;
             return enuToCartesian(
-                bs, baseHeight,
-                triangle[a * 3] + (triangle[b * 3] - triangle[a * 3]) * ratio,
-                triangle[a * 3 + 1] + (triangle[b * 3 + 1] - triangle[a * 3 + 1]) * ratio,
-                level
+                bs, baseHeight, triangle[a * 3] + (triangle[b * 3] - triangle[a * 3]) * ratio,
+                triangle[a * 3 + 1] + (triangle[b * 3 + 1] - triangle[a * 3 + 1]) * ratio, level
             );
         }
-        for (var levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+        for (levelIndex = 0; levelIndex < levels.length; levelIndex++) {
             for (var i = 0; i < triangles.length; i++) {
                 var triangle = triangles[i], points = [], point;
                 point = edgePoint(triangle, 0, 1, levels[levelIndex]); if (point) points.push(point);
@@ -132,17 +293,16 @@ var FRIIS_ISOSURFACE = (function () {
         return collection;
     }
     function showSummary(data) {
-        var meta = data.meta || {};
-        var box = $("friis-coverage-surface-summary");
+        var meta = data.meta || {}, box = $("friis-coverage-surface-summary");
         if (!box) return;
         box.className = "coverage-volume-summary friis-summary";
         box.style.display = "block";
         box.innerHTML = "<strong>Friis 자유공간 · RSRP = " + meta.thresholdDbm +
-            "dBm 경계면</strong><br>Sionna 미사용 · " +
-            (meta.antennaModel || "이중 야기 + 옴니") + " H/V 방향이득 적용 · " +
-            Number(meta.triangleCount).toLocaleString() + " triangles<br>" +
+            "dBm 경계면</strong><br>" + (meta.antennaModel || "선택 안테나") +
+            " · 북 0°/동 90° · " + Number(meta.triangleCount).toLocaleString() + " triangles<br>" +
             "<strong>주황색 표면</strong> · 최대 경계거리 " +
-            (Number(meta.maximumBoundaryDistanceM) / 1000).toFixed(1) + "km";
+            (Number(meta.maximumBoundaryDistanceM) / 1000).toFixed(1) + "km<br>" +
+            "RSRP 기준은 전체 크기를 바꾸며, 원형 여부는 선택한 안테나의 H-Plane으로 결정됩니다.";
     }
     function flyToSurface(viewer, data, baseHeight) {
         var triangles = data.trianglesEnuM || [];
@@ -162,7 +322,7 @@ var FRIIS_ISOSURFACE = (function () {
             });
         } catch (e) { /* 표시 유지 */ }
     }
-    function renderSurface(data, baseHeight) {
+    function renderSurface(data, baseHeight, shouldFly) {
         clear();
         var viewer = getViewer();
         if (!viewer || !window.Cesium || !window.BEAMPATTERN) {
@@ -172,14 +332,13 @@ var FRIIS_ISOSURFACE = (function () {
         var opacity = Number($("coverage-surface-opacity").value) / 100;
         if (!isFinite(opacity)) opacity = 0.4;
         currentBaseHeight = baseHeight;
+        currentData = data;
         var geometry = buildGeometry(data, baseHeight);
         var instance = new Cesium.GeometryInstance({
             geometry: geometry,
-            attributes: {
-                color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-                    Cesium.Color.fromCssColorString("#f97316").withAlpha(opacity)
-                )
-            }
+            attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+                Cesium.Color.fromCssColorString("#f97316").withAlpha(opacity)
+            )}
         });
         primitive = viewer.scene.primitives.add(new Cesium.Primitive({
             geometryInstances: instance,
@@ -190,21 +349,23 @@ var FRIIS_ISOSURFACE = (function () {
         visible = true;
         $("btn-friis-coverage-surface").classList.add("active");
         showSummary(data);
-        flyToSurface(viewer, data, baseHeight);
-        setStatus("Friis 자유공간 -100dBm 연속 3D 경계면 표시 · 주황색 · " +
-            Number(data.meta.triangleCount).toLocaleString() + " triangles");
+        if (shouldFly !== false) flyToSurface(viewer, data, baseHeight);
+        setStatus("Friis 자유공간 " + data.meta.thresholdDbm + "dBm 연속 3D 경계면 · " +
+            data.meta.antennaModel + " · 북 0°/동 90°");
     }
-    function show() {
+    function show(shouldFly) {
         var viewer = getViewer();
         if (!viewer || !window.Cesium) {
             setStatus("지도가 준비된 뒤 Friis 연속 3D 경계면을 표시하세요.", true);
             return;
         }
-        setStatus("Friis 자유공간 -100dBm 3D 경계면을 불러오는 중...");
-        loadData().then(function (data) {
-            resolveTerrainBase(viewer, data, function (baseHeight) { renderSurface(data, baseHeight); });
+        setStatus("선택한 기준으로 Friis 3D 경계면을 계산하는 중...");
+        loadDisplayData().then(function (data) {
+            resolveTerrainBase(viewer, data, function (baseHeight) {
+                renderSurface(data, baseHeight, shouldFly);
+            });
         }).catch(function (error) {
-            setStatus("Friis 3D 경계면 로드 실패: " + error.message, true);
+            setStatus("Friis 3D 경계면 계산 실패: " + error.message, true);
         });
     }
     function hide() {
@@ -215,19 +376,25 @@ var FRIIS_ISOSURFACE = (function () {
         var showButton = $("btn-friis-coverage-surface");
         var hideButton = $("btn-coverage-surface-hide");
         var opacity = $("coverage-surface-opacity");
-        if (showButton) showButton.addEventListener("click", show);
+        var threshold = $("friis-surface-threshold");
+        var pattern = $("friis-surface-pattern");
+        if (showButton) showButton.addEventListener("click", function () { show(true); });
         if (hideButton) hideButton.addEventListener("click", hide);
         if (opacity) opacity.addEventListener("change", function () {
-            if (visible && dataCache) renderSurface(dataCache, currentBaseHeight);
+            if (visible && currentData) renderSurface(currentData, currentBaseHeight, false);
         });
+        if (threshold) threshold.addEventListener("change", function () { if (visible) show(false); });
+        if (pattern) pattern.addEventListener("change", function () { if (visible) show(false); });
     }
     if (typeof document !== "undefined") {
         if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
         else init();
     }
-    return {show: show, hide: hide, clear: clear, buildGeometry: buildGeometry};
+    return {
+        show: show, hide: hide, clear: clear, buildGeometry: buildGeometry,
+        buildFormulaSurface: buildFormulaSurface, boundaryDistanceM: boundaryDistanceM,
+        thresholdScale: thresholdScale, compassPoint: compassPoint
+    };
 })();
 
-if (typeof module !== "undefined" && module.exports) {
-    module.exports = FRIIS_ISOSURFACE;
-}
+if (typeof module !== "undefined" && module.exports) module.exports = FRIIS_ISOSURFACE;
