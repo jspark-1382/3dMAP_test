@@ -1,11 +1,11 @@
 // ============================================================
-// 빔패턴 모듈: 900MHz 옴니 안테나 수직면(V-Plane) 패턴
+// 빔패턴 모듈: 260827 이중 야기 + 옴니 합성 패턴
 //   - Cesium 비의존 순수 계산 모듈 (node 테스트 가능)
 //   - 전역: window.BEAMPATTERN
 // ------------------------------------------------------------
-// 패턴 특성 (OM900_pattern_1.csv 910MHz 수직면 기준):
+// 패턴 특성 (260827_pattern.xlsx / 야기+옴니 시트 기준):
 //   · Python pattern_loader.py와 같은 +theta/-theta linear-power 평균 사용
-//   · Azimuth는 현재 omni 가정
+//   · Azimuth는 야기+옴니 시트의 수평 패턴을 사용
 //   · 아래 테이블은 theta(0=천정, 90=수평, 180=저면)의 상대이득
 //   · run_coverage.py가 생성한 antenna_pattern.json이 있으면 브라우저에서 자동 동기화
 // ============================================================
@@ -198,13 +198,44 @@ var BEAMPATTERN = (function () {
         [180, -34.5907]
     ];
 
-    // 측정 H-Plane 상대이득. JSON 로드 전에는 옴니(0dB)로 안전하게 시작한다.
-    var HORIZONTAL_TABLE = [[-180, 0], [180, 0]];
+    // JSON을 읽기 전에도 이전 안테나 형상을 노출하지 않도록 새 패턴의
+    // 핵심점으로 1° fallback 표를 만든다. JSON 로드 후에는 원본 1° 값으로 교체된다.
+    var FALLBACK_VERTICAL = [
+        [0, -0.0123], [7, 0], [10, -0.0103], [20, -0.381], [30, -1.5308],
+        [40, -3.6599], [50, -6.2233], [60, -8.3045], [70, -6.9984],
+        [80, -3.4399], [90, -2.1309], [100, -3.8544], [110, -9.4471],
+        [120, -18.0483], [130, -13.8136], [140, -14.0468], [150, -13.3195],
+        [160, -16.043], [170, -19.4647], [180, -22.8429]
+    ];
+    for (var fallbackTheta = 0; fallbackTheta <= 180; fallbackTheta++) {
+        var fallbackIndex = 0;
+        while (fallbackIndex + 1 < FALLBACK_VERTICAL.length &&
+               FALLBACK_VERTICAL[fallbackIndex + 1][0] < fallbackTheta) fallbackIndex++;
+        var fallbackNext = Math.min(FALLBACK_VERTICAL.length - 1, fallbackIndex + 1);
+        var fallbackA = FALLBACK_VERTICAL[fallbackIndex];
+        var fallbackB = FALLBACK_VERTICAL[fallbackNext];
+        var fallbackRatio = fallbackA[0] === fallbackB[0]
+            ? 0 : (fallbackTheta - fallbackA[0]) / (fallbackB[0] - fallbackA[0]);
+        BEAM_TABLE[fallbackTheta] = [
+            fallbackTheta,
+            fallbackA[1] * (1 - fallbackRatio) + fallbackB[1] * fallbackRatio
+        ];
+    }
+
+    // 측정 H-Plane 상대이득. JSON 로드 전에는 방위 무관 0dB로 안전하게 시작한다.
+    var HORIZONTAL_TABLE = [
+        [-180, -0.413], [-150, -2.807], [-120, -6.205], [-90, -0.414],
+        [-89, 0], [-60, -1.537], [-30, -3.671], [0, -3.674], [30, -3.716],
+        [60, -1.334], [90, -0.405], [120, -6.536], [150, -2.383], [180, -0.413]
+    ];
     var PATTERN_META = {
-        model: "PM-OM900_06",
+        model: "이중 야기 + 옴니 (260827)",
+        configuration: "dual Yagi + omni",
+        sourceFile: "260827_pattern.xlsx",
+        sourceSheet: "야기+옴니",
         frequencyMHz: 910,
-        maxGainDbi: 5.4,
-        approximation: "measured V-plane + omni H-plane fallback"
+        maxGainDbi: 7.2,
+        approximation: "dual Yagi + omni measured H/V separable 3D"
     };
 
     var WGS84_A = 6378137.0;                 // 장반경 (m)
@@ -276,6 +307,9 @@ var BEAMPATTERN = (function () {
     function getPatternMeta() {
         return {
             model: PATTERN_META.model,
+            configuration: PATTERN_META.configuration,
+            sourceFile: PATTERN_META.sourceFile,
+            sourceSheet: PATTERN_META.sourceSheet,
             frequencyMHz: PATTERN_META.frequencyMHz,
             maxGainDbi: PATTERN_META.maxGainDbi,
             approximation: PATTERN_META.approximation
@@ -295,9 +329,12 @@ var BEAMPATTERN = (function () {
                     }
                 }
                 PATTERN_META.model = j.model || PATTERN_META.model;
+                PATTERN_META.configuration = j.configuration || PATTERN_META.configuration;
+                PATTERN_META.sourceFile = j.sourceFile || PATTERN_META.sourceFile;
+                PATTERN_META.sourceSheet = j.sourceSheet || PATTERN_META.sourceSheet;
                 PATTERN_META.frequencyMHz = Number(j.frequencyMHz) || PATTERN_META.frequencyMHz;
                 PATTERN_META.maxGainDbi = Number(j.maxGainDbi);
-                if (!isFinite(PATTERN_META.maxGainDbi)) PATTERN_META.maxGainDbi = 5.4;
+                if (!isFinite(PATTERN_META.maxGainDbi)) PATTERN_META.maxGainDbi = 7.2;
                 PATTERN_META.approximation = j.approximation || PATTERN_META.approximation;
                 if (cb) cb(null, j);
             })
@@ -450,11 +487,12 @@ var BEAMPATTERN = (function () {
     // (elDeg, azDeg): 세계좌표 고도각/방위각 → 안테나 프레임 고도각으로 변환 후 패턴 조회
     // sin(el') = cos(el)·sin(tilt)·cos(az − swing) + sin(el)·cos(tilt)
     function tiltedGain(elDeg, azDeg, tiltDeg, swingDeg) {
-        if (!tiltDeg) return gainAtElevation(elDeg);
+        if (!tiltDeg) return gainAtDirection(azDeg, elDeg);
         var el = toRad(elDeg), az = toRad(azDeg), t = toRad(tiltDeg);
         var sinEl = Math.cos(el) * Math.sin(t) * Math.cos(az - toRad(swingDeg)) + Math.sin(el) * Math.cos(t);
         sinEl = Math.max(-1, Math.min(1, sinEl));
-        return gainAtElevation(Math.asin(sinEl) * 180 / Math.PI);
+        return gainAtElevation(Math.asin(sinEl) * 180 / Math.PI) +
+               horizontalGainAtAzimuth(azDeg - (swingDeg || 0));
     }
 
     // 두 경위도 간 방위각(deg, 북=0 시계방향)
@@ -466,7 +504,7 @@ var BEAMPATTERN = (function () {
     }
 
     // 범용 패턴 메시 생성: gainFn(azDeg, elDeg) → dB 를 받아 3D 반투명 표면 메시 생성
-    //   - 측정 옴니 패턴뿐 아니라 Sionna RT 예측 기반(방위 의존) 패턴에도 사용
+    //   - 측정 이중 야기+옴니 패턴뿐 아니라 Sionna RT 예측 기반 패턴에도 사용
     //   - 반환: { positions:[{e,n,u,gainDb}], indices } (로컬 ENU 미터, 틸트/스윙 회전 적용)
     function buildPatternMeshFromGain(gainFn, scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg) {
         var azs = [], els = [];
@@ -517,10 +555,10 @@ var BEAMPATTERN = (function () {
     // 도넛 메시 생성 (로컬 ENU 미터 좌표, 틸트/스윙 회전 적용)
     // azStep/elStep: 분할 간격(deg), scaleMeters: 최대 반경
     // 메시는 안테나 프레임에서 생성 후 틸트/스윙 회전 적용
-    // (수직면 전용이므로 방위 무관 → buildPatternMeshFromGain 위임)
+    // H/V 합성 상대이득을 사용해 방위와 고도를 모두 반영한다.
     function buildPatternMesh(scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg) {
         return buildPatternMeshFromGain(
-            function (_az, el) { return gainAtElevation(el); },
+            function (az, el) { return gainAtDirection(az, el); },
             scaleMeters, azStepDeg, elStepDeg, tiltDeg, swingDeg);
     }
 

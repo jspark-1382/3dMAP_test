@@ -738,7 +738,7 @@ function prefillDefaultBs() {
         });
     }
 
-    // ================== 안테나 빔패턴 (900MHz 옴니) ==================
+    // ================== 안테나 방사 패턴 (260827 이중 야기 + 옴니) ==================
     var beamEntities = [];      // 와이어프레임 폴리라인 엔티티
     var beamPrimitive = null;   // 표면 프리미티브(지원 시)
 var beamCapPrimitive = null;// 절단면(Cap) 프리미티브 (상단 절단 시 뚜껑 히트맵)
@@ -846,7 +846,7 @@ function localToCartesian(e, n, u) {
         _beamSwing = getBeamSwing();
         updateTxMarker();
 
-        // ---- 이득 소스 선택: Sionna RT 예측 기반 또는 측정 옴니 패턴 ----
+        // ---- 이득 소스 선택: Sionna RT 예측 기반 또는 이중 야기+옴니 측정 패턴 ----
         var sionnaPat = null, gainFn = null, rsrpFn = null, azDependent = false;
         if (isBeamSionnaChecked() && window.SIONNA && SIONNA.hasData()) {
             var selAlt = $("beam-sionna-alt");
@@ -863,7 +863,7 @@ function localToCartesian(e, n, u) {
             }
         }
         if (!gainFn) {
-            gainFn = function (_az, el) { return BEAMPATTERN.gainAtElevation(el); };
+            gainFn = function (az, el) { return BEAMPATTERN.gainAtDirection(az, el); };
         }
 
         // 방위각/고도각별 반경 계산 헬퍼 (진폭 비례)
@@ -967,10 +967,10 @@ function localToCartesian(e, n, u) {
                     flushRun(rAt(aStart * 5 + 15, elV).dbm);   // 세그먼트 중앙 RSRP로 색 결정
                 }
             } else {
-                // 측정 옴니(방위 무관): 기존 방식 — 링 전체 단일 색
-                var tR = rAt(0, elV);
+                // 측정 이중 야기+옴니: 방위별 H-Plane 반경을 링 형상에 반영
                 var ringPts2 = [];
                 for (var ia = 0; ia <= 72; ia++) {
+                    var tR = rAt(ia * 5, elV);
                     var op = clipLocal(
                         tR.r * elTable[eIdx].cosE * azTable[ia].c,
                         tR.r * elTable[eIdx].cosE * azTable[ia].s,
@@ -1135,13 +1135,13 @@ function localToCartesian(e, n, u) {
                 msg += " · 하부 전파 볼륨(상단 절단 @ 단말 고도 " + clipAltTop + "m)";
             }
         } else {
-            msg = "기존 3D 방향성 표시 [레거시 V-Plane]: 표시배율 " + scale + "m · 900MHz 옴니 가정";
+            msg = "기존 3D 방향성 표시 [260827 이중 야기+옴니 H/V 합성]: 표시배율 " + scale + "m · 910MHz";
             var tilt = getBeamTilt(), swing = getBeamSwing();
             if (tilt) msg += " · 틸트 " + tilt + "°";
             if (tilt || swing) msg += " · 스윙 " + swing + "°";
         }
         if (isBeamSionnaChecked() && window.SIONNA && SIONNA.hasData() && !sionnaPat) {
-            msg += " · 커버리지 방향성 추출 실패(레거시 V-Plane 형상으로 표시)";
+            msg += " · 커버리지 방향성 추출 실패(260827 측정 H/V 합성 형상으로 표시)";
         }
         if (beamSurfaceUnsupported) msg += " · 표면 렌더링 미지원(와이어프레임만)";
         setStatus(msg);
@@ -1183,7 +1183,7 @@ function localToCartesian(e, n, u) {
             ensureBeamSionnaData(function (err, d) {
                 if (err || !d) {
                     setStatus("선택한 커버리지 결과 로드 실패: " + (err && err.message ? err.message : "데이터 없음") +
-                              " — 레거시 V-Plane 형상을 보려면 체크를 해제하세요.", true);
+                              " — 260827 이중 야기+옴니 H/V 합성 형상을 보려면 체크를 해제하세요.", true);
                     return;
                 }
                 populateBeamSionnaAlts(d);

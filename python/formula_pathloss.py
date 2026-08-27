@@ -88,6 +88,9 @@ def calculate_result(pattern=None, quick=False):
             "tool": "Friis formula (Sionna not used)",
             "generated": dt.datetime.now().isoformat(timespec="seconds"),
             "antennaModel": pattern["model"],
+            "antennaConfiguration": pattern.get("configuration"),
+            "antennaSourceFile": pattern.get("source_file"),
+            "antennaSourceSheet": pattern.get("source_sheet"),
             "antennaPatternMode": "2D horizontal + 2D vertical -> separable 3D approximation",
             "frequencyMHz": int(CFG.FREQ_HZ / 1e6),
             "txPowerDbm": CFG.TX_POWER_DBM,
@@ -107,7 +110,7 @@ def calculate_result(pattern=None, quick=False):
             "altitudesM": list(CFG.TERMINAL_ALTS_M),
             "coverageThresholdDbm": CFG.COVERAGE_THRESHOLD_DBM,
             "sceneModel": "formula free space",
-            "calculationModel": "Friis FSPL + measured separable antenna gain",
+            "calculationModel": "Friis FSPL + dual Yagi/omni measured separable antenna gain",
         },
         "grids": {},
     }

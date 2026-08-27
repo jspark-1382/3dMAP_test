@@ -3,7 +3,22 @@
 // 실행: node test/test_beampattern.js
 // ============================================================
 var assert = require("assert");
+var fs = require("fs");
+var path = require("path");
 var BP = require("../js/beampattern.js");
+var patternJson = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "Data", "sionna", "antenna_pattern.json"),
+    "utf8"
+));
+BP.setThetaPattern(patternJson.thetaDeg, patternJson.verticalRelativeGainDb);
+BP.setHorizontalPattern(patternJson.phiDeg, patternJson.horizontalRelativeGainDb);
+
+function expectedVerticalAtElevation(elDeg) {
+    var theta = Math.max(0, Math.min(180, 90 - Number(elDeg)));
+    var i0 = Math.floor(theta), i1 = Math.min(180, i0 + 1), f = theta - i0;
+    return patternJson.verticalRelativeGainDb[i0] * (1 - f) +
+           patternJson.verticalRelativeGainDb[i1] * f;
+}
 
 var passed = 0, failed = 0;
 function test(name, fn) {
@@ -12,28 +27,26 @@ function test(name, fn) {
 }
 
 // ---------- gainAtElevation ----------
-test("gainAtElevation: el=0(수평) → 0 dB", function () {
-    assert.strictEqual(BP.gainAtElevation(0), 0.0);
+test("gainAtElevation: 새 패턴의 수평(theta=90) 값", function () {
+    assert.strictEqual(BP.gainAtElevation(0), expectedVerticalAtElevation(0));
 });
-test("gainAtElevation: el=+90(천정) → -30 dB", function () {
-    assert.strictEqual(BP.gainAtElevation(90), -30.0);
+test("gainAtElevation: 새 패턴의 천정(theta=0) 값", function () {
+    assert.strictEqual(BP.gainAtElevation(90), expectedVerticalAtElevation(90));
 });
-test("gainAtElevation: el=-90(저중) → -30 dB", function () {
-    var g = BP.gainAtElevation(-90);
-    // 도표 각도 t = (90-(-90))%360 = 180 → -30.0
-    assert.strictEqual(g, -30.0);
+test("gainAtElevation: 새 패턴의 저면(theta=180) 값", function () {
+    assert.strictEqual(BP.gainAtElevation(-90), expectedVerticalAtElevation(-90));
 });
-test("gainAtElevation: el=+30 → 도표 t=60 → -9.0 dB", function () {
-    assert.strictEqual(BP.gainAtElevation(30), -9.0);
+test("gainAtElevation: el=+30 → theta=60", function () {
+    assert.strictEqual(BP.gainAtElevation(30), expectedVerticalAtElevation(30));
 });
-test("gainAtElevation: el=-40 → 도표 t=130 → -16.5 dB", function () {
-    assert.strictEqual(BP.gainAtElevation(-40), -16.5);
+test("gainAtElevation: el=-40 → theta=130", function () {
+    assert.strictEqual(BP.gainAtElevation(-40), expectedVerticalAtElevation(-40));
 });
-test("gainAtElevation: 보간 el=+35 → t=55 → (-7.5-9)/2=-8.25", function () {
-    assert.ok(Math.abs(BP.gainAtElevation(35) - (-8.25)) < 1e-9);
+test("gainAtElevation: 새 패턴 보간", function () {
+    assert.ok(Math.abs(BP.gainAtElevation(35.5) - expectedVerticalAtElevation(35.5)) < 1e-9);
 });
-test("gainAtElevation: 래핑 el=+100 → t=(90-100)%360=350 → -29.0", function () {
-    assert.strictEqual(BP.gainAtElevation(100), -29.0);
+test("gainAtElevation: 범위를 넘는 고도각은 theta=0으로 제한", function () {
+    assert.strictEqual(BP.gainAtElevation(100), expectedVerticalAtElevation(100));
 });
 
 // ---------- enuToEcef ----------
@@ -117,7 +130,7 @@ test("buildPatternMesh: 정점 수/인덱스 범위", function () {
         assert.ok(mesh.indices[i] >= 0 && mesh.indices[i] < mesh.positions.length);
     }
 });
-test("buildPatternMesh: 수평 반경 = scale, 천정 반경 ≈ 0", function () {
+test("buildPatternMesh: 새 H/V 합성 상대이득이 반경에 반영됨", function () {
     var mesh = BP.buildPatternMesh(500, 15, 5);
     var idxH = 12 * 37 + 18;   // az=180, el=0 (els 인덱스 18)
     var idxTop = 12 * 37 + 36; // az=180, el=90
@@ -125,32 +138,32 @@ test("buildPatternMesh: 수평 반경 = scale, 천정 반경 ≈ 0", function ()
     var pt = mesh.positions[idxTop];
     var rh = Math.sqrt(ph.e * ph.e + ph.n * ph.n);
     var rt = Math.sqrt(pt.e * pt.e + pt.n * pt.n + pt.u * pt.u);
-    assert.ok(Math.abs(rh - 500) < 0.01, "rh=" + rh);
-    assert.ok(rt < 500 * 0.04, "rt=" + rt + " (10^(-30/20)=0.0316)");
-    assert.strictEqual(ph.gainDb, 0.0);
-    assert.strictEqual(pt.gainDb, -30.0);
+    var gh = BP.gainAtDirection(180, 0);
+    var gt = BP.gainAtDirection(180, 90);
+    assert.ok(Math.abs(rh - 500 * Math.pow(10, gh / 20)) < 0.01, "rh=" + rh);
+    assert.ok(Math.abs(rt - 500 * Math.pow(10, gt / 20)) < 0.01, "rt=" + rt);
+    assert.strictEqual(ph.gainDb, gh);
+    assert.strictEqual(pt.gainDb, gt);
 });
 
 // ---------- 틸트/스윙 ----------
-test("tiltedGain: 틸트 0이면 gainAtElevation과 동일", function () {
-    assert.strictEqual(BP.tiltedGain(30, 45, 0, 0), BP.gainAtElevation(30));
-    assert.strictEqual(BP.tiltedGain(-40, 200, 0, 123), BP.gainAtElevation(-40));
+test("tiltedGain: 틸트 0이면 gainAtDirection과 동일", function () {
+    assert.strictEqual(BP.tiltedGain(30, 45, 0, 0), BP.gainAtDirection(45, 30));
+    assert.strictEqual(BP.tiltedGain(-40, 200, 0, 123), BP.gainAtDirection(200, -40));
 });
-test("tiltedGain: 틸트 10°·스윙 0° → 북쪽(az=0) 수평방향은 안테나 el'=−10 → G(−10)=-12.5", function () {
-    // sin(el') = cos(0)sin(10)cos(0) + 0 = sin(10) → el' = −10
-    // t = 90+10 = 100 → -8.5? 표: 100 → -8.5. 확인: gainAtElevation(-10): t=100 → -8.5
-    assert.strictEqual(BP.tiltedGain(0, 0, 10, 0), BP.gainAtElevation(-10));
+test("tiltedGain: 틸트 10°·스윙 0° → az=0 수평방향은 안테나 el'=+10", function () {
+    assert.strictEqual(BP.tiltedGain(0, 0, 10, 0), BP.gainAtDirection(0, 10));
 });
-test("tiltedGain: 틸트 10°·스윙 0° → 남쪽(az=180) 수평방향은 el'=+10 → G(10)=-29.0", function () {
-    assert.strictEqual(BP.tiltedGain(0, 180, 10, 0), BP.gainAtElevation(10));
+test("tiltedGain: 틸트 10°·스윙 0° → az=180 수평방향은 el'=-10", function () {
+    assert.strictEqual(BP.tiltedGain(0, 180, 10, 0), BP.gainAtDirection(180, -10));
 });
 test("tiltedGain: 틸트 방향 아래 10° 지점은 주엽 통과 → G(0)=0 dB", function () {
     // az=0(스윙 방향), el=−10, 틸트 10 → el'=0 → 0 dB
-    assert.strictEqual(BP.tiltedGain(-10, 0, 10, 0), 0.0);
+    assert.strictEqual(BP.tiltedGain(-10, 0, 10, 0), BP.gainAtDirection(0, 0));
 });
 test("tiltedGain: 스윙 90°면 동쪽(az=90)이 틸트 방향", function () {
-    assert.strictEqual(BP.tiltedGain(-10, 90, 10, 90), 0.0);
-    assert.strictEqual(BP.tiltedGain(0, 90, 10, 90), BP.gainAtElevation(-10));
+    assert.strictEqual(BP.tiltedGain(-10, 90, 10, 90), BP.gainAtDirection(0, 0));
+    assert.strictEqual(BP.tiltedGain(0, 90, 10, 90), BP.gainAtDirection(0, 10));
 });
 test("rotateENU: 천정 벡터가 틸트만큼 스윙 방향으로 기울어짐", function () {
     var r = BP.rotateENU(0, 0, 1, 10, 90);
@@ -174,16 +187,17 @@ test("buildPatternMesh: 틸트 적용 시 천정 정점이 기울어짐", functi
     var mesh = BP.buildPatternMesh(500, 15, 5, 10, 90);
     var idxTop = 6 * 37 + 36; // az=90, el=90
     var pt = mesh.positions[idxTop];
-    // az=90 방향(동)으로 틸트 10° → e = 15.8·sin10° ≈ 2.74, u = 15.8·cos10° ≈ 15.56
+    // az=90 방향의 새 H/V 합성 이득 반경을 틸트 10° 회전
     var t = 10 * Math.PI / 180;
-    assert.ok(Math.abs(pt.e - 500 * 0.0316 * Math.sin(t)) < 0.1, "e=" + pt.e);
-    assert.ok(Math.abs(pt.u - 500 * 0.0316 * Math.cos(t)) < 0.1, "u=" + pt.u);
+    var radius = 500 * Math.pow(10, BP.gainAtDirection(90, 90) / 20);
+    assert.ok(Math.abs(pt.e - radius * Math.sin(t)) < 0.1, "e=" + pt.e);
+    assert.ok(Math.abs(pt.u - radius * Math.cos(t)) < 0.1, "u=" + pt.u);
 });
 
 // ---------- buildPatternMeshFromGain ----------
-test("buildPatternMeshFromGain: 방위 무관 함수 → buildPatternMesh와 동일 결과", function () {
+test("buildPatternMeshFromGain: H/V 합성 함수 → buildPatternMesh와 동일 결과", function () {
     var m1 = BP.buildPatternMesh(500, 15, 5);
-    var m2 = BP.buildPatternMeshFromGain(function (_az, el) { return BP.gainAtElevation(el); }, 500, 15, 5);
+    var m2 = BP.buildPatternMeshFromGain(function (az, el) { return BP.gainAtDirection(az, el); }, 500, 15, 5);
     assert.strictEqual(m2.positions.length, m1.positions.length);
     for (var i = 0; i < m1.positions.length; i++) {
         var a = m1.positions[i], b = m2.positions[i];

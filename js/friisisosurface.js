@@ -1,31 +1,27 @@
 // ============================================================
-// 별도 Sionna 3D 계산 결과의 -100dBm 연속 등가면 표시
-// 기존 Sionna 고도면/적층/빔 렌더러와 독립된 Primitive를 사용한다.
+// Friis 자유공간 식으로 계산한 -100dBm 연속 3D 경계면 표시
+// 기존 Sionna 등가면과 독립된 Primitive를 사용해 동시 비교할 수 있다.
 // ============================================================
-var SIONNA_ISOSURFACE = (function () {
+var FRIIS_ISOSURFACE = (function () {
     "use strict";
 
-    var DATA_URL = "Data/sionna/sionna_volume_surface.json";
+    var DATA_URL = "Data/sionna/friis_volume_surface.json";
     var dataCache = null;
     var primitive = null;
     var rings = null;
-    var txEntity = null;
     var visible = false;
     var currentBaseHeight = 0;
 
     function $(id) { return document.getElementById(id); }
-
     function getViewer() {
         return (window.ws3d && window.ws3d.viewer) ? window.ws3d.viewer : null;
     }
-
     function setStatus(message, isError) {
         var el = $("status");
         if (!el) return;
         el.textContent = message;
         el.className = isError ? "status error" : "status";
     }
-
     function loadData() {
         if (dataCache) return Promise.resolve(dataCache);
         return fetch(DATA_URL).then(function (response) {
@@ -36,7 +32,6 @@ var SIONNA_ISOSURFACE = (function () {
             return json;
         });
     }
-
     function resolveTerrainBase(viewer, data, callback) {
         var bs = data.meta && data.meta.bs;
         if (!bs || !Cesium.sampleTerrainMostDetailed || !viewer.terrainProvider) {
@@ -49,12 +44,10 @@ var SIONNA_ISOSURFACE = (function () {
             callback(isFinite(height) ? height : 0);
         }).catch(function () { callback(0); });
     }
-
     function enuToCartesian(bs, baseHeight, east, north, up) {
         var point = BEAMPATTERN.enuToEcef(bs.lon, bs.lat, baseHeight, east, north, up);
         return new Cesium.Cartesian3(point.x, point.y, point.z);
     }
-
     function clear() {
         var viewer = getViewer();
         if (viewer) {
@@ -64,20 +57,15 @@ var SIONNA_ISOSURFACE = (function () {
             if (rings) {
                 try { viewer.scene.primitives.remove(rings); } catch (e2) { /* 무시 */ }
             }
-            if (txEntity) {
-                try { viewer.entities.remove(txEntity); } catch (e3) { /* 무시 */ }
-            }
         }
         primitive = null;
         rings = null;
-        txEntity = null;
         visible = false;
-        var button = $("btn-coverage-surface");
+        var button = $("btn-friis-coverage-surface");
         if (button) button.classList.remove("active");
-        var summary = $("coverage-surface-summary");
+        var summary = $("friis-coverage-surface-summary");
         if (summary) summary.style.display = "none";
     }
-
     function buildGeometry(data, baseHeight) {
         var triangles = data.trianglesEnuM || [];
         var bs = data.meta.bs;
@@ -88,8 +76,7 @@ var SIONNA_ISOSURFACE = (function () {
             var triangle = triangles[i];
             for (var vertex = 0; vertex < 3; vertex++) {
                 var point = enuToCartesian(
-                    bs,
-                    baseHeight,
+                    bs, baseHeight,
                     Number(triangle[vertex * 3]),
                     Number(triangle[vertex * 3 + 1]),
                     Number(triangle[vertex * 3 + 2])
@@ -113,71 +100,54 @@ var SIONNA_ISOSURFACE = (function () {
             boundingSphere: Cesium.BoundingSphere.fromVertices(values)
         });
     }
-
     function addHorizontalRings(viewer, data, baseHeight) {
         var triangles = data.trianglesEnuM || [];
         var bs = data.meta.bs;
-        var levels = [500, 1000, 2000, 4000, 6000, 8000, 10000];
+        var levels = [500, 1000, 2000, 5000, 10000];
         var collection = viewer.scene.primitives.add(new Cesium.PolylineCollection());
         var material = Cesium.Material.fromType("Color", {
-            color: Cesium.Color.fromCssColorString("#c084fc").withAlpha(0.72)
+            color: Cesium.Color.fromCssColorString("#fb923c").withAlpha(0.82)
         });
-
         function edgePoint(triangle, a, b, level) {
-            var za = triangle[a * 3 + 2];
-            var zb = triangle[b * 3 + 2];
+            var za = triangle[a * 3 + 2], zb = triangle[b * 3 + 2];
             if ((za < level && zb < level) || (za > level && zb > level) || za === zb) return null;
             var ratio = (level - za) / (zb - za);
             if (ratio < 0 || ratio > 1) return null;
             return enuToCartesian(
-                bs,
-                baseHeight,
+                bs, baseHeight,
                 triangle[a * 3] + (triangle[b * 3] - triangle[a * 3]) * ratio,
                 triangle[a * 3 + 1] + (triangle[b * 3 + 1] - triangle[a * 3 + 1]) * ratio,
                 level
             );
         }
-
         for (var levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-            var level = levels[levelIndex];
             for (var i = 0; i < triangles.length; i++) {
-                var triangle = triangles[i];
-                var points = [];
-                var point;
-                point = edgePoint(triangle, 0, 1, level); if (point) points.push(point);
-                point = edgePoint(triangle, 1, 2, level); if (point) points.push(point);
-                point = edgePoint(triangle, 2, 0, level); if (point) points.push(point);
-                if (points.length === 2) {
-                    collection.add({ positions: points, width: 1.35, material: material });
-                }
+                var triangle = triangles[i], points = [], point;
+                point = edgePoint(triangle, 0, 1, levels[levelIndex]); if (point) points.push(point);
+                point = edgePoint(triangle, 1, 2, levels[levelIndex]); if (point) points.push(point);
+                point = edgePoint(triangle, 2, 0, levels[levelIndex]); if (point) points.push(point);
+                if (points.length === 2) collection.add({positions: points, width: 1.35, material: material});
             }
         }
         return collection;
     }
-
     function showSummary(data) {
         var meta = data.meta || {};
-        var box = $("coverage-surface-summary");
+        var box = $("friis-coverage-surface-summary");
         if (!box) return;
-        var boundary = meta.boundaryReached || {};
-        var closed = !boundary.west && !boundary.east && !boundary.south && !boundary.north && !boundary.top;
-        box.className = "coverage-volume-summary" + (closed ? "" : " warning");
+        box.className = "coverage-volume-summary friis-summary";
         box.style.display = "block";
-        box.innerHTML = "<strong>Sionna RT · RSRP = " + meta.thresholdDbm +
-            "dBm 연속 경계면</strong><br>별도 3D 계산 " +
-            (meta.horizontalSizeM / 1000).toFixed(0) + "km × " +
-            (meta.horizontalSizeM / 1000).toFixed(0) + "km · 고도 0.1~" +
-            (Math.max.apply(null, meta.altitudesM) / 1000).toFixed(0) + "km · " +
-            Number(meta.triangleCount).toLocaleString() + " triangles" +
-            (closed ? "<br><strong>✓ 수평·상단 계산 경계 안에서 닫힌 형상</strong>" :
-                "<br><strong>⚠ 계산영역 경계에 도달한 형상</strong>");
+        box.innerHTML = "<strong>Friis 자유공간 · RSRP = " + meta.thresholdDbm +
+            "dBm 경계면</strong><br>Sionna 미사용 · " +
+            (meta.antennaModel || "이중 야기 + 옴니") + " H/V 방향이득 적용 · " +
+            Number(meta.triangleCount).toLocaleString() + " triangles<br>" +
+            "<strong>주황색 표면</strong> · 최대 경계거리 " +
+            (Number(meta.maximumBoundaryDistanceM) / 1000).toFixed(1) + "km";
     }
-
     function flyToSurface(viewer, data, baseHeight) {
         var triangles = data.trianglesEnuM || [];
-        var bs = data.meta.bs;
         if (!triangles.length) return;
-        var samplePoints = [];
+        var bs = data.meta.bs, samplePoints = [];
         var step = Math.max(1, Math.floor(triangles.length / 500));
         for (var i = 0; i < triangles.length; i += step) {
             var triangle = triangles[i];
@@ -187,129 +157,77 @@ var SIONNA_ISOSURFACE = (function () {
         }
         try {
             viewer.camera.flyToBoundingSphere(Cesium.BoundingSphere.fromPoints(samplePoints), {
-                offset: new Cesium.HeadingPitchRange(
-                    Cesium.Math.toRadians(20),
-                    Cesium.Math.toRadians(-28),
-                    0
-                ),
+                offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(20), Cesium.Math.toRadians(-28), 0),
                 duration: 1.4
             });
         } catch (e) { /* 표시 유지 */ }
     }
-
     function renderSurface(data, baseHeight) {
         clear();
         var viewer = getViewer();
         if (!viewer || !window.Cesium || !window.BEAMPATTERN) {
-            setStatus("3D 커버리지 경계면을 표시할 지도가 준비되지 않았습니다.", true);
+            setStatus("Friis 3D 경계면을 표시할 지도가 준비되지 않았습니다.", true);
             return;
         }
         var opacity = Number($("coverage-surface-opacity").value) / 100;
-        if (!isFinite(opacity)) opacity = 0.38;
+        if (!isFinite(opacity)) opacity = 0.4;
         currentBaseHeight = baseHeight;
         var geometry = buildGeometry(data, baseHeight);
         var instance = new Cesium.GeometryInstance({
             geometry: geometry,
             attributes: {
                 color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-                    Cesium.Color.fromCssColorString("#22d3ee").withAlpha(opacity)
+                    Cesium.Color.fromCssColorString("#f97316").withAlpha(opacity)
                 )
             }
         });
         primitive = viewer.scene.primitives.add(new Cesium.Primitive({
             geometryInstances: instance,
-            appearance: new Cesium.PerInstanceColorAppearance({
-                translucent: true,
-                closed: false,
-                flat: true
-            }),
+            appearance: new Cesium.PerInstanceColorAppearance({translucent: true, closed: false, flat: true}),
             asynchronous: true
         }));
         rings = addHorizontalRings(viewer, data, baseHeight);
-
-        var bs = data.meta.bs;
-        txEntity = viewer.entities.add({
-            position: Cesium.Cartesian3.fromDegrees(
-                bs.lon,
-                bs.lat,
-                baseHeight + Number(data.meta.antennaHeightM || 0)
-            ),
-            point: {
-                pixelSize: 14,
-                color: Cesium.Color.YELLOW,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3
-            },
-            label: {
-                text: "TX",
-                font: "bold 13px Malgun Gothic",
-                fillColor: Cesium.Color.YELLOW,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -22)
-            }
-        });
-
         visible = true;
-        $("btn-coverage-surface").classList.add("active");
+        $("btn-friis-coverage-surface").classList.add("active");
         showSummary(data);
         flyToSurface(viewer, data, baseHeight);
-        var meta = data.meta || {};
-        var altitudes = meta.altitudesM || [];
-        var maxAltKm = altitudes.length ? Number(altitudes[altitudes.length - 1]) / 1000 : 0;
-        setStatus(
-            "Sionna -100dBm 연속 3D 커버리지 경계면 표시 · " +
-            (Number(meta.horizontalSizeM) / 1000).toFixed(0) + "km × " +
-            (Number(meta.horizontalSizeM) / 1000).toFixed(0) + "km / 고도 " +
-            maxAltKm.toFixed(0) + "km 계산 · " +
-            Number(meta.triangleCount).toLocaleString() + " triangles"
-        );
+        setStatus("Friis 자유공간 -100dBm 연속 3D 경계면 표시 · 주황색 · " +
+            Number(data.meta.triangleCount).toLocaleString() + " triangles");
     }
-
     function show() {
         var viewer = getViewer();
         if (!viewer || !window.Cesium) {
-            setStatus("지도가 준비된 뒤 연속 3D 경계면을 표시하세요.", true);
+            setStatus("지도가 준비된 뒤 Friis 연속 3D 경계면을 표시하세요.", true);
             return;
         }
-        setStatus("별도 Sionna -100dBm 3D 경계면을 불러오는 중...");
+        setStatus("Friis 자유공간 -100dBm 3D 경계면을 불러오는 중...");
         loadData().then(function (data) {
-            resolveTerrainBase(viewer, data, function (baseHeight) {
-                renderSurface(data, baseHeight);
-            });
+            resolveTerrainBase(viewer, data, function (baseHeight) { renderSurface(data, baseHeight); });
         }).catch(function (error) {
-            setStatus("Sionna 3D 경계면 로드 실패: " + error.message, true);
+            setStatus("Friis 3D 경계면 로드 실패: " + error.message, true);
         });
     }
-
     function hide() {
         clear();
-        setStatus("Sionna -100dBm 연속 3D 커버리지 경계면 숨김");
+        setStatus("Sionna/Friis 연속 3D 커버리지 경계면 숨김");
     }
-
     function init() {
-        var showButton = $("btn-coverage-surface");
+        var showButton = $("btn-friis-coverage-surface");
         var hideButton = $("btn-coverage-surface-hide");
         var opacity = $("coverage-surface-opacity");
         if (showButton) showButton.addEventListener("click", show);
         if (hideButton) hideButton.addEventListener("click", hide);
-        if (opacity) opacity.addEventListener("input", function () {
-            $("coverage-surface-opacity-val").textContent = opacity.value + "%";
-        });
         if (opacity) opacity.addEventListener("change", function () {
             if (visible && dataCache) renderSurface(dataCache, currentBaseHeight);
         });
     }
-
     if (typeof document !== "undefined") {
         if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
         else init();
     }
-
-    return { show: show, hide: hide, clear: clear };
+    return {show: show, hide: hide, clear: clear, buildGeometry: buildGeometry};
 })();
 
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = SIONNA_ISOSURFACE;
+    module.exports = FRIIS_ISOSURFACE;
 }

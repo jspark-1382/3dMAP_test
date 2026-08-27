@@ -199,6 +199,44 @@ html, body {
     font-size: 12px;
 }
 
+.legend-header {
+    min-width: 208px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.legend-header .legend-title {
+    margin-bottom: 0;
+}
+
+.legend-toggle {
+    flex: 0 0 auto;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #475569;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.legend-toggle:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+.legend-toggle:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+}
+
+.legend-panel-body {
+    margin-top: 6px;
+}
+
 .legend-source {
     color: #64748b;
     font-size: 10px;
@@ -609,6 +647,34 @@ html, body {
     flex: 0 0 auto;
 }
 
+.surface-model-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+}
+
+.surface-model-buttons #btn-coverage-surface-hide {
+    grid-column: 1 / -1;
+}
+
+.surface-sionna-btn {
+    background: #0891b2;
+}
+
+.surface-sionna-btn:hover,
+.surface-sionna-btn.active {
+    background: #0e7490;
+}
+
+.surface-friis-btn {
+    background: #f97316;
+}
+
+.surface-friis-btn:hover,
+.surface-friis-btn.active {
+    background: #ea580c;
+}
+
 .coverage-opacity-row {
     margin-top: 2px;
 }
@@ -660,6 +726,68 @@ html, body {
     border-color: #fdba74;
     background: #fff7ed;
 }
+
+.coverage-volume-summary.friis-summary {
+    border-color: #fdba74;
+    background: #fff7ed;
+}
+
+.distance-table-btn {
+    margin-top: 6px;
+    width: 100%;
+}
+
+#coverage-distance-result {
+    display: none;
+    margin-top: 6px;
+}
+
+.distance-table-wrap {
+    max-height: 300px;
+    overflow: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+}
+
+.distance-table {
+    min-width: 290px;
+    background: #ffffff;
+}
+
+.distance-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f8fafc;
+}
+
+.distance-table th,
+.distance-table td {
+    text-align: right;
+}
+
+.distance-table th:first-child,
+.distance-table td:first-child {
+    text-align: left;
+}
+
+.distance-table-note {
+    margin: 5px 1px;
+    color: #64748b;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.surface-key {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 3px;
+    border-radius: 2px;
+}
+
+.surface-key.sionna { background: #22d3ee; }
+.surface-key.friis { background: #f97316; }
 
 .coverage-volume-summary strong {
     color: #0f172a;

@@ -71,18 +71,45 @@ var RF_COLOR = (function () {
         return Math.max(0, Math.min(1, isNaN(t) ? 0 : t));
     }
 
+    function setLegendCollapsed(el, collapsed) {
+        if (!el) return;
+        var bodies = el.getElementsByClassName("legend-panel-body");
+        var buttons = el.getElementsByClassName("legend-toggle");
+        el.setAttribute("data-collapsed", collapsed ? "true" : "false");
+        if (bodies.length) bodies[0].style.display = collapsed ? "none" : "block";
+        if (buttons.length) {
+            buttons[0].textContent = collapsed ? "보기" : "숨기기";
+            buttons[0].setAttribute("aria-expanded", collapsed ? "false" : "true");
+            buttons[0].title = collapsed ? "범례 내용 보기" : "범례 내용 숨기기";
+        }
+    }
+
+    function toggleLegend(el) {
+        if (!el) return;
+        setLegendCollapsed(el, el.getAttribute("data-collapsed") !== "true");
+    }
+
+    function legendHeader(title) {
+        return '<div class="legend-header"><div class="legend-title">' + title + '</div>' +
+               '<button type="button" class="legend-toggle" aria-expanded="true" ' +
+               'onclick="RF_COLOR.toggleLegend(this.parentNode.parentNode)">숨기기</button></div>';
+    }
+
     function renderLegend(el) {
         if (!el) return;
-        var html = '<div class="legend-title">통합 RSRP 범례 (dBm)</div>' +
+        var collapsed = el.getAttribute("data-collapsed") === "true";
+        var html = legendHeader("통합 RSRP 범례 (dBm)") +
+                   '<div class="legend-panel-body">' +
                    '<div class="legend-source">CSV 측정 · 일반 예측 · RT/자유공간 공통</div>' +
                    '<div class="legend-vertical"><div class="legend-gradient"></div>' +
                    '<div class="legend-range-labels">';
         for (var i = 0; i < BINS.length; i++) {
             html += '<div class="legend-range-label">' + BINS[i].label + '</div>';
         }
-        html += '</div></div>';
+        html += '</div></div></div>';
         el.innerHTML = html;
         el.style.display = "block";
+        setLegendCollapsed(el, collapsed);
     }
 
     return {
@@ -92,7 +119,10 @@ var RF_COLOR = (function () {
         rgb255: rgb255,
         rgb01: rgb01,
         dbmToT: dbmToT,
-        renderLegend: renderLegend
+        renderLegend: renderLegend,
+        legendHeader: legendHeader,
+        setLegendCollapsed: setLegendCollapsed,
+        toggleLegend: toggleLegend
     };
 })();
 

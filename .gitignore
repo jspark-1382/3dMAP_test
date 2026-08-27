@@ -9,3 +9,9 @@ js/config.js
 sionna_*.log
 __pycache__/
 
+# 외부 공개 저장소에 올리지 않는 안테나 원본/작업 파일
+Data/pattern/*.xlsx
+Data/pattern/~$*
+Data/sionna/antenna_pattern.json
+python/backup/
+

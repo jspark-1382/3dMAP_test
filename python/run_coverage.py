@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Sionna RT 기반 OM900 커버리지 예측.
+Sionna RT 기반 이중 야기 + 옴니 커버리지 예측.
 
 현재 단계:
-- 제조사/측정 CSV의 horizontal-plane + vertical-plane 2D cut으로
+- 260827_pattern.xlsx의 야기+옴니 horizontal-plane + vertical-plane 2D cut으로
   separable 3D 안테나 패턴을 근사한다.
 - 추후 드론 실측 데이터가 생기면 이 기본 패턴 위에 3D correction을 추가한다.
 """
@@ -37,7 +37,7 @@ OUTPUT_DIR = os.path.normpath(
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "sionna_coverage.json")
 FREE_SPACE_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "sionna_free_space.json")
 
-PATTERN_NAME = "om900_measured_2cut_3d"
+PATTERN_NAME = "dual_yagi_omni_260827_2cut_3d"
 
 WGS84_A = 6378137.0
 WGS84_E2 = 6.69437999014e-3
@@ -248,6 +248,9 @@ def solve_rt_result(scene, solver, pattern, quick, direct_only):
             "tool": f"Sionna RT {rt.__version__}",
             "generated": _dt.datetime.now().isoformat(timespec="seconds"),
             "antennaModel": pattern["model"],
+            "antennaConfiguration": pattern.get("configuration"),
+            "antennaSourceFile": pattern.get("source_file"),
+            "antennaSourceSheet": pattern.get("source_sheet"),
             "antennaPatternMode": "2D horizontal + 2D vertical -> separable 3D approximation",
             "frequencyMHz": int(CFG.FREQ_HZ / 1e6),
             "txPowerDbm": CFG.TX_POWER_DBM,

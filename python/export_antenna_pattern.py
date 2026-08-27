@@ -34,9 +34,13 @@ def build_export(pattern=None):
 
     return {
         "model": pattern["model"],
+        "configuration": pattern.get("configuration", "dual Yagi + omni"),
+        "sourceFile": pattern.get("source_file"),
+        "sourceSheet": pattern.get("source_sheet"),
         "frequencyMHz": pattern["freq_mhz"],
         "maxGainDbi": round(float(pattern["max_gain_dbi"]), 3),
-        "approximation": "measured H-plane + measured V-plane separable 3D",
+        "approximation": "dual Yagi + omni measured H/V separable 3D",
+        "bs": {"lat": CFG.bs_lat_lon()[0], "lon": CFG.bs_lat_lon()[1]},
         "thetaDeg": pattern["theta_deg"],
         "relativeGainDb": vertical_relative.round(4).tolist(),
         "verticalRelativeGainDb": vertical_relative.round(4).tolist(),

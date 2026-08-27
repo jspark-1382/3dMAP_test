@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>브이월드 3D 지도 - CSV 좌표 이동</title>
-    <link rel="stylesheet" href="css/style.css?v=7" />
+    <link rel="stylesheet" href="css/style.css?v=9" />
     <script type="text/javascript" src="js/config.js?v=2"></script>
     <script type="text/javascript">
       (function () {
@@ -16,13 +16,15 @@
       })();
     </script>
     <script type="text/javascript" src="js/csv.js"></script>
-    <script type="text/javascript" src="js/rfcolor.js?v=3"></script>
-    <script type="text/javascript" src="js/beampattern.js?v=9"></script>
-    <script type="text/javascript" src="js/main.js?v=18"></script>
-    <script type="text/javascript" src="js/radiationpattern.js?v=8"></script>
+    <script type="text/javascript" src="js/rfcolor.js?v=4"></script>
+    <script type="text/javascript" src="js/beampattern.js?v=10"></script>
+    <script type="text/javascript" src="js/main.js?v=19"></script>
+    <script type="text/javascript" src="js/radiationpattern.js?v=10"></script>
     <script type="text/javascript" src="js/sionna.js?v=22"></script>
     <script type="text/javascript" src="js/coveragevolume.js?v=2"></script>
-    <script type="text/javascript" src="js/coverageisosurface.js?v=2"></script>
+    <script type="text/javascript" src="js/coverageisosurface.js?v=3"></script>
+    <script type="text/javascript" src="js/friisisosurface.js?v=2"></script>
+    <script type="text/javascript" src="js/coveragecomparison.js?v=2"></script>
     <script type="text/javascript" src="js/help.js?v=1"></script>
     <style>
         /* ---- 모든 RF 화면이 공유하는 단일 RSRP 범례 ---- */
@@ -164,12 +166,13 @@
 
         <div class="beam-section coverage-surface-section">
             <div class="section-title section-title-help">
-                <span>🌐 Sionna -100dBm 3D 커버리지 경계면</span>
-                <button type="button" class="help-btn" data-help="help-coverage-surface" data-help-title="Sionna -100dBm 3D 커버리지 경계면">ⓘ 설명</button>
+                <span>🌐 -100dBm 연속 3D 커버리지 경계면</span>
+                <button type="button" class="help-btn" data-help="help-coverage-surface" data-help-title="Sionna/Friis -100dBm 3D 커버리지 경계면">ⓘ 설명</button>
             </div>
-            <div class="tx-row">
-                <button id="btn-coverage-surface" class="tx-btn">연속 3D 경계면 표시</button>
-                <button id="btn-coverage-surface-hide" class="tx-btn tx-btn-secondary">숨김</button>
+            <div class="surface-model-buttons">
+                <button id="btn-coverage-surface" class="tx-btn surface-sionna-btn">Sionna RT 표시</button>
+                <button id="btn-friis-coverage-surface" class="tx-btn surface-friis-btn">Friis 자유공간 표시</button>
+                <button id="btn-coverage-surface-hide" class="tx-btn tx-btn-secondary">전체 숨김</button>
             </div>
             <div class="tx-row coverage-opacity-row">
                 <span class="tx-label">표면 투명도</span>
@@ -177,6 +180,9 @@
                 <span id="coverage-surface-opacity-val" class="tx-label">40%</span>
             </div>
             <div id="coverage-surface-summary" class="coverage-volume-summary"></div>
+            <div id="friis-coverage-surface-summary" class="coverage-volume-summary"></div>
+            <button id="btn-coverage-distance-table" class="tx-btn distance-table-btn">고도별 최단 거리 표</button>
+            <div id="coverage-distance-result"></div>
         </div>
 
         <div class="beam-section coverage-volume-section">
@@ -206,7 +212,7 @@
 
         <div class="beam-section">
             <div class="section-title section-title-help">
-                <span>📡 안테나 고유 방사 패턴 (측정 H/V)</span>
+                <span>📡 이중 야기 + 옴니 방사 패턴</span>
                 <button type="button" class="help-btn" data-help="help-radiation" data-help-title="안테나 고유 방사 패턴">ⓘ 설명</button>
             </div>
             <div class="tx-row">
@@ -320,20 +326,23 @@
         <p>세 환경 결과는 모두 같은 절대 RSRP(dBm) 색상 범례를 사용하므로 수신전력 차이를 직접 비교할 수 있습니다.</p>
     </div>
     <div id="help-radiation" class="help-source" hidden>
-        <p>제조사에서 측정한 H-Plane과 V-Plane을 합성한 안테나 자체의 3차원 상대 방사 패턴입니다.</p>
+        <p><code>Data/pattern/260827_pattern.xlsx</code>의 <strong>야기+옴니</strong> 시트에 있는 이중 야기 + 옴니 H-Plane/V-Plane을 합성한 3차원 상대 방사 패턴입니다.</p>
         <p><strong>상대이득 0dB</strong>가 가장 강한 방향이며, 음수 값이 작아질수록 그 방향의 방사가 약합니다. 이 값은 RSRP가 아닙니다.</p>
         <p>수신 고도·거리손실·지면 반사는 사용하지 않습니다. 크기 슬라이더는 실제 도달거리가 아닌 지도에서 보기 위한 표시 배율입니다.</p>
     </div>
     <div id="help-coverage-surface" class="help-source" hidden>
-        <p>첨부 이미지처럼 연속된 3D 형상으로 보기 위해 기존 7개 고도면 결과를 사용하지 않고 <strong>Sionna RT를 별도로 다시 실행</strong>해 만든 -100dBm 등가면입니다.</p>
-        <p>수평 320km 영역을 3km 격자로 계산하고, 고도 100m부터 40km까지 23개 단면을 계산했습니다. 각 단면은 120만 ray 표본을 사용하며 평탄 지면 직접파와 정반사를 포함합니다.</p>
+        <p><strong>청록색 Sionna RT</strong>와 <strong>주황색 Friis 자유공간</strong>의 RSRP -100dBm 연속 경계면을 각각 또는 동시에 표시합니다.</p>
+        <p>Sionna 형상은 별도 3D Radio Map 계산 결과이고, Friis 형상은 Sionna를 사용하지 않고 측정 H/V 안테나 이득과 자유공간 손실식을 역으로 풀어 방향별 임계거리를 계산한 결과입니다.</p>
+        <p>Sionna 결과 파일의 메타데이터에 기록된 수평 범위·격자·고도 단면·ray 표본 수를 사용하며, 평탄 지면 직접파와 정반사를 포함합니다. 새 패턴으로 결과를 다시 만들면 화면 설명과 상태 표시도 그 계산 범위를 자동으로 따릅니다.</p>
         <p>계산된 3차원 RSRP 격자를 선형 전력 공간에서 연속 보간한 뒤 <strong>RSRP = -100dBm</strong> 교차면을 marching tetrahedra 방식으로 추출했습니다. 표면 안쪽이 -100dBm 이상 수신 가능 영역입니다.</p>
         <p>수평과 상단 계산 경계에서는 커버리지가 모두 닫혀 있으므로, 기존 3km 고도면 결과처럼 계산영역 끝에서 잘린 형상이 아닙니다.</p>
         <h3>코드와 결과 파일</h3>
         <ol class="help-code-map">
             <li><code>python/run_coverage_volume_3d.py</code><br><strong>simulate_volume()</strong> — 별도 Sionna 3D 격자 계산<br><strong>extract_surface()</strong> — -100dBm 등가면 삼각형 추출</li>
-            <li><code>Data/sionna/sionna_volume_surface.json</code> — 14,876개 삼각형으로 구성된 계산 결과</li>
+            <li><code>Data/sionna/sionna_volume_surface.json</code> — 새 패턴으로 생성한 Sionna 연속 경계면 결과</li>
             <li><code>js/coverageisosurface.js</code><br><strong>renderSurface()</strong> — 지도 좌표로 변환해 반투명 연속 3D 표면 표시</li>
+            <li><code>python/formula_coverage_surface_3d.py</code><br><strong>boundary_distance_m()</strong> — Friis 임계거리 계산<br><strong>build_surface()</strong> — 자유공간 3D 경계면 생성</li>
+            <li><code>js/coveragecomparison.js</code><br><strong>minimumDistanceAtAltitude()</strong> — 고도 평면과 경계면 교차점까지의 최단 3D 거리 계산</li>
         </ol>
     </div>
     <div id="help-coverage-volume" class="help-source" hidden>
@@ -351,7 +360,7 @@
     </div>
     <div id="help-legacy-beam" class="help-source" hidden>
         <p>기존 렌더링 동작을 보존한 분석용 표시입니다.</p>
-        <p><strong>커버리지 결과 변환을 끄면</strong> 기존 V-Plane 형상을 표시합니다. <strong>켜면</strong> 선택한 커버리지 RSRP를 각도 방향의 3D 형상으로 변환합니다.</p>
+        <p><strong>커버리지 결과 변환을 끄면</strong> 260827 이중 야기+옴니의 H-Plane/V-Plane 합성 형상을 표시합니다. <strong>켜면</strong> 선택한 커버리지 RSRP를 각도 방향의 3D 형상으로 변환합니다.</p>
         <p>커버리지 형상의 크기는 정규화된 상대 RSRP, 색상은 절대 RSRP를 사용합니다. 이 형상은 안테나 고유 방사 패턴이 아니며, 결과 기반 모드에는 틸트·스윙을 중복 적용하지 않습니다.</p>
     </div>
 

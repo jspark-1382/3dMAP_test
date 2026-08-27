@@ -82,7 +82,11 @@ var RADIATION_PATTERN = (function () {
         var el = $("radiation-legend");
         if (!el) return;
         var bins = BEAMPATTERN.BEAM_BINS;
-        var html = '<div class="legend-title">안테나 상대이득 (dB)</div>' +
+        var collapsed = el.getAttribute("data-collapsed") === "true";
+        var html = (window.RF_COLOR
+            ? RF_COLOR.legendHeader("이중 야기 + 옴니 상대이득 (dB)")
+            : '<div class="legend-title">이중 야기 + 옴니 상대이득 (dB)</div>') +
+            '<div class="legend-panel-body">' +
             '<div class="legend-source">측정 H/V 합성 · RSRP 아님</div>';
         for (var i = 0; i < bins.length; i++) {
             var label = bins[i].lo === -Infinity
@@ -91,8 +95,10 @@ var RADIATION_PATTERN = (function () {
             html += '<div class="legend-row"><span class="legend-color" style="background:' +
                 bins[i].color + '"></span><span class="legend-label">' + label + '</span></div>';
         }
+        html += '</div>';
         el.innerHTML = html;
         el.style.display = "block";
+        if (window.RF_COLOR) RF_COLOR.setLegendCollapsed(el, collapsed);
     }
 
     function hideLegend() {
@@ -194,9 +200,9 @@ var RADIATION_PATTERN = (function () {
             });
         } catch (cameraError) { /* 패턴 표시는 유지 */ }
         setStatus(
-            "안테나 고유 방사 패턴 표시: " + (meta.model || "PM-OM900_06") +
+            "이중 야기 + 옴니 방사 패턴 표시: " + (meta.model || "이중 야기 + 옴니 (260827)") +
             " · " + (meta.frequencyMHz || 910) + "MHz · 피크 " +
-            (isFinite(meta.maxGainDbi) ? meta.maxGainDbi.toFixed(1) : "5.4") +
+            (isFinite(meta.maxGainDbi) ? meta.maxGainDbi.toFixed(1) : "7.2") +
             "dBi · 측정 H/V separable 3D 근사 · 수신고도/Pathloss/RSRP 미사용 · 표시배율 " +
             scale + "m"
         );

@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-OM900 안테나 패턴 CSV 로더.
+안테나 패턴 로더.
+
+기본 입력은 ``Data/pattern/260827_pattern.xlsx``의 ``야기+옴니`` 시트다.
+이 시트에는 사용자가 구성한 이중 야기 + 옴니 합성 패턴이 0..360도로
+정리되어 있다. 이전 OM900 CSV도 명시적인 ``path`` 인자로 계속 읽을 수 있다.
 
 CSV 구조
 --------
@@ -28,8 +32,10 @@ import numpy as np
 
 DEFAULT_PATTERN_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "Data", "pattern", "OM900_pattern_1.csv",
+    "..", "Data", "pattern", "260827_pattern.xlsx",
 )
+DEFAULT_PATTERN_SHEET = "야기+옴니"
+DEFAULT_PATTERN_MODEL = "이중 야기 + 옴니 (260827)"
 
 FREQ_BANDS = {
     "910": {"horizontal_col": 1, "vertical_col": 2},
@@ -50,6 +56,60 @@ def _read_rows(path: str) -> List[List[str]]:
     raise IOError(f"패턴 CSV 인코딩을 판별할 수 없습니다: {path}") from last_error
 
 
+def _read_xlsx_pattern(path: str, sheet_name: str = DEFAULT_PATTERN_SHEET):
+    """Excel 합성 시트의 angle/수평/수직 열을 읽는다."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError as error:
+        raise RuntimeError(
+            "260827 패턴 Excel을 읽으려면 openpyxl이 필요합니다."
+        ) from error
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"패턴 시트를 찾을 수 없습니다: {sheet_name} "
+                f"(가능: {', '.join(workbook.sheetnames)})"
+            )
+        sheet = workbook[sheet_name]
+        entries = {}
+        for angle, horizontal, vertical in sheet.iter_rows(
+            min_row=2,
+            max_col=3,
+            values_only=True,
+        ):
+            try:
+                entries[float(angle)] = (float(horizontal), float(vertical))
+            except (TypeError, ValueError):
+                continue
+        return DEFAULT_PATTERN_MODEL, entries
+    finally:
+        workbook.close()
+
+
+def _read_csv_pattern(path: str, freq: str):
+    rows = _read_rows(path)
+    cols = FREQ_BANDS[freq]
+    model = ""
+    if rows:
+        if len(rows[0]) > 1 and rows[0][1].strip():
+            model = rows[0][1].strip()
+        if len(rows) > 1 and rows[1][0].strip():
+            model = rows[1][0].strip()
+
+    entries = {}
+    for row in rows[3:]:
+        try:
+            deg = float(row[0])
+            g_h = float(row[cols["horizontal_col"]])
+            g_v = float(row[cols["vertical_col"]])
+        except (ValueError, IndexError):
+            continue
+        entries[deg] = (g_h, g_v)
+    return model, entries
+
+
 def _power_average_db(values_db):
     """dB 값들을 linear power에서 평균한 뒤 다시 dB로 변환."""
     values_db = np.asarray(values_db, dtype=float)
@@ -68,26 +128,12 @@ def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
             f"(가능: {', '.join(FREQ_BANDS)})"
         )
 
-    rows = _read_rows(os.path.abspath(path))
-    cols = FREQ_BANDS[freq]
-
-    # 첫 번째/두 번째 줄 형식이 파일에 따라 조금 달라도 최대한 안전하게 처리
-    model = ""
-    if rows:
-        if len(rows[0]) > 1 and rows[0][1].strip():
-            model = rows[0][1].strip()
-        if len(rows) > 1 and rows[1][0].strip():
-            model = rows[1][0].strip()
-
-    entries = {}
-    for row in rows[3:]:
-        try:
-            deg = float(row[0])
-            g_h = float(row[cols["horizontal_col"]])
-            g_v = float(row[cols["vertical_col"]])
-        except (ValueError, IndexError):
-            continue
-        entries[deg] = (g_h, g_v)
+    absolute_path = os.path.abspath(path)
+    is_xlsx = os.path.splitext(absolute_path)[1].lower() in (".xlsx", ".xlsm")
+    if is_xlsx:
+        model, entries = _read_xlsx_pattern(absolute_path)
+    else:
+        model, entries = _read_csv_pattern(absolute_path, freq)
 
     if not entries:
         raise ValueError(f"유효한 패턴 데이터가 없습니다: {path}")
@@ -112,16 +158,22 @@ def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
     for theta in theta_deg:
         candidates = []
 
-        if theta in v_by_angle:
-            candidates.append(v_by_angle[theta])
-
-        neg = -theta
-        if neg in v_by_angle and neg != theta:
-            candidates.append(v_by_angle[neg])
-
-        # CSV에는 +180 대신 -180만 있는 경우가 일반적
-        if theta == 180.0 and -180.0 in v_by_angle:
-            candidates.append(v_by_angle[-180.0])
+        if is_xlsx:
+            # 0..360 polar cut: theta와 360-theta는 같은 고도각의 반대쪽 cut이다.
+            if theta in v_by_angle:
+                candidates.append(v_by_angle[theta])
+            mirror = 360.0 - theta
+            if mirror in v_by_angle and mirror != theta:
+                candidates.append(v_by_angle[mirror])
+        else:
+            if theta in v_by_angle:
+                candidates.append(v_by_angle[theta])
+            neg = -theta
+            if neg in v_by_angle and neg != theta:
+                candidates.append(v_by_angle[neg])
+            # CSV에는 +180 대신 -180만 있는 경우가 일반적
+            if theta == 180.0 and -180.0 in v_by_angle:
+                candidates.append(v_by_angle[-180.0])
 
         if not candidates:
             raise ValueError(f"수직면 패턴에서 theta={theta}° 값을 만들 수 없습니다.")
@@ -135,14 +187,28 @@ def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
     # 원본 -180..179 deg를 azimuth(phi)로 그대로 사용.
     # 보간 시 seam을 닫기 위해 +180점은 -180점과 동일하게 추가한다.
     # ------------------------------------------------------------
-    phi_deg = raw_angles.copy()
-    phi_gain_db = horizontal_db.copy()
+    if is_xlsx:
+        # 0..359를 Sionna/브라우저 공통 방위축 -180..180으로 변환한다.
+        phi_pairs = []
+        for angle, gains in entries.items():
+            if angle >= 360.0:
+                continue
+            phi = ((float(angle) + 180.0) % 360.0) - 180.0
+            phi_pairs.append((phi, float(gains[0])))
+        phi_pairs.sort(key=lambda item: item[0])
+        phi_deg = np.asarray([item[0] for item in phi_pairs], dtype=float)
+        phi_gain_db = np.asarray([item[1] for item in phi_pairs], dtype=float)
+        if len(phi_deg) and phi_deg[0] == -180.0:
+            phi_deg = np.append(phi_deg, 180.0)
+            phi_gain_db = np.append(phi_gain_db, phi_gain_db[0])
+    else:
+        phi_deg = raw_angles.copy()
+        phi_gain_db = horizontal_db.copy()
+        if -180.0 in entries and 180.0 not in entries:
+            phi_deg = np.append(phi_deg, 180.0)
+            phi_gain_db = np.append(phi_gain_db, entries[-180.0][0])
 
-    if -180.0 in entries and 180.0 not in entries:
-        phi_deg = np.append(phi_deg, 180.0)
-        phi_gain_db = np.append(phi_gain_db, entries[-180.0][0])
-
-    max_h = float(np.max(horizontal_db))
+    max_h = float(np.max(phi_gain_db))
     max_v = float(np.max(theta_gain_db))
 
     # 2D cut들을 합성할 때 기준이 되는 절대 peak gain.
@@ -152,6 +218,9 @@ def load_pattern(path: str | None = None, freq: str = "910") -> Dict:
     return {
         "model": model,
         "freq_mhz": int(freq),
+        "configuration": "dual Yagi + omni",
+        "source_file": os.path.basename(absolute_path),
+        "source_sheet": DEFAULT_PATTERN_SHEET if is_xlsx else None,
 
         "raw_angle_deg": raw_angles.tolist(),
         "raw_horizontal_gain_dbi": horizontal_db.tolist(),
