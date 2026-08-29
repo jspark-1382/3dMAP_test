@@ -11,10 +11,41 @@ BS_LAT_DMS = (34, 36, 45.7)
 BS_LON_DMS = (127, 12, 21.5)
 BS_ALT_M = 16.0
 
-# ---- 주파수 / 전력 ----
-FREQ_BAND = "910"       # "910" 또는 "955"
-FREQ_HZ = 910e6
-TX_POWER_DBM = 21.0
+# ---- LTE 주파수 / 전력 기준 ----
+FREQ_BAND = "955"       # "910" 또는 "955"
+FREQ_HZ = 955e6
+BANDWIDTH_MHZ = 10.0
+NUMBER_OF_RB = 50
+SUBCARRIERS = 600
+
+# 송신기 전체 출력. Sionna 장면의 송신기 설정에 사용한다.
+TOTAL_TX_POWER_DBM = 21.0
+TX_POWER_DBM = TOTAL_TX_POWER_DBM  # 기존 계산 코드와의 호환 이름
+
+# RSRP는 전체 대역 출력이 아니라 기준신호 RE 전력을 기준으로 계산한다.
+# 사용자가 제공한 장비 입력값을 우선 적용한다.
+BASE_RE_POWER_DBM = 18.22
+RS_POWER_OFFSET_DB = 0.0
+RSRP_REFERENCE_POWER_DBM = BASE_RE_POWER_DBM + RS_POWER_OFFSET_DB
+CABLE_LOSS_DB = 1.0
+SYSTEM_LOSS_DB = CABLE_LOSS_DB
+
+
+def link_budget_metadata():
+    """모든 결과 파일이 공유하는 LTE/RSRP 입력값."""
+    return {
+        "frequencyMHz": int(FREQ_HZ / 1e6),
+        "bandwidthMHz": BANDWIDTH_MHZ,
+        "numberOfResourceBlocks": NUMBER_OF_RB,
+        "subcarriers": SUBCARRIERS,
+        "txPowerDbm": TOTAL_TX_POWER_DBM,
+        "baseRePowerDbm": BASE_RE_POWER_DBM,
+        "rsPowerOffsetDb": RS_POWER_OFFSET_DB,
+        "rsrpReferencePowerDbm": RSRP_REFERENCE_POWER_DBM,
+        "cableLossDb": CABLE_LOSS_DB,
+        "systemLossDb": SYSTEM_LOSS_DB,
+        "powerInputMode": "user-provided independent total and Base RE powers",
+    }
 
 # ---- 안테나 ----
 # 260827_pattern.xlsx / 야기+옴니 시트의

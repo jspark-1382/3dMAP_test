@@ -41,7 +41,7 @@ var SIONNA_VOLUME = (function () {
     function fetchData(key) {
         var info = sourceInfo(key);
         if (cache[key]) return Promise.resolve(cache[key]);
-        return fetch(info.url).then(function (response) {
+        return fetch(info.url, {cache: "no-store"}).then(function (response) {
             if (!response.ok) throw new Error("HTTP " + response.status);
             return response.json();
         }).then(function (json) {
@@ -173,6 +173,8 @@ var SIONNA_VOLUME = (function () {
             "dBm</strong><br>계산 고도 " + (data.meta.altitudesM || []).join("/") +
             "m · 조건 충족 " + qualified.toLocaleString() + "/" + total.toLocaleString() +
             "셀 (" + pct.toFixed(1) + "%)" +
+            (data.meta.cableLossDb === undefined ?
+                "<br><strong>참고: 케이블 손실 1dB 적용 전 Sionna 결과</strong>" : "") +
             (clipped ? "<br><strong>⚠ 계산 격자 경계까지 도달:</strong> 실제 커버리지 끝이 아니라 3km 시뮬레이션 영역에서 잘린 결과입니다." : "");
     }
 

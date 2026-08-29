@@ -140,7 +140,11 @@ def simulate_volume(
         )
         centers = np.asarray(dr.detach(rmap.cell_centers), dtype=float).reshape(-1, 3)
         gain = np.asarray(dr.detach(rmap.path_gain), dtype=float).ravel()
-        received = CFG.TX_POWER_DBM + 10.0 * np.log10(np.maximum(gain, 1e-30))
+        received = (
+            CFG.RSRP_REFERENCE_POWER_DBM
+            + 10.0 * np.log10(np.maximum(gain, 1e-30))
+            - CFG.SYSTEM_LOSS_DB
+        )
 
         side = int(round(math.sqrt(len(received))))
         if side * side != len(received):
@@ -350,8 +354,7 @@ def run(args):
             "surfaceInterpolation": "Gaussian averaging in linear-power domain, sigma=(z 0.65, y 0.9, x 0.9)",
             "surfaceTopology": "largest connected coverage body after 3x3 horizontal opening",
             "environment": "direct + flat-ground reflection" if not args.direct_only else "direct only",
-            "frequencyMHz": int(CFG.FREQ_HZ / 1e6),
-            "txPowerDbm": CFG.TX_POWER_DBM,
+            **CFG.link_budget_metadata(),
             "antennaModel": pattern["model"],
             "antennaConfiguration": pattern.get("configuration"),
             "antennaSourceFile": pattern.get("source_file"),

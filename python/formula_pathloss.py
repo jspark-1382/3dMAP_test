@@ -92,10 +92,9 @@ def calculate_result(pattern=None, quick=False):
             "antennaSourceFile": pattern.get("source_file"),
             "antennaSourceSheet": pattern.get("source_sheet"),
             "antennaPatternMode": "2D horizontal + 2D vertical -> separable 3D approximation",
-            "frequencyMHz": int(CFG.FREQ_HZ / 1e6),
-            "txPowerDbm": CFG.TX_POWER_DBM,
+            **CFG.link_budget_metadata(),
             "rxGainDbi": 0.0,
-            "systemLossDb": 0.0,
+            "systemLossDb": CFG.SYSTEM_LOSS_DB,
             "antennaMaxGainDbi": round(peak_gain_dbi, 2),
             "horizontalMaxGainDbi": round(pattern["horizontal_max_gain_dbi"], 2),
             "verticalMaxGainDbi": round(pattern["vertical_max_gain_dbi"], 2),
@@ -132,7 +131,10 @@ def calculate_result(pattern=None, quick=False):
             + (horizontal_gain - np.max(horizontal_src))
         )
         fspl_db = free_space_path_loss_db(distance_m, CFG.FREQ_HZ)
-        received_dbm = float(CFG.TX_POWER_DBM) + tx_gain_dbi - fspl_db
+        received_dbm = (
+            float(CFG.RSRP_REFERENCE_POWER_DBM) + tx_gain_dbi
+            - fspl_db - float(CFG.SYSTEM_LOSS_DB)
+        )
 
         points = []
         for i in range(len(east)):

@@ -252,8 +252,7 @@ def solve_rt_result(scene, solver, pattern, quick, direct_only):
             "antennaSourceFile": pattern.get("source_file"),
             "antennaSourceSheet": pattern.get("source_sheet"),
             "antennaPatternMode": "2D horizontal + 2D vertical -> separable 3D approximation",
-            "frequencyMHz": int(CFG.FREQ_HZ / 1e6),
-            "txPowerDbm": CFG.TX_POWER_DBM,
+            **CFG.link_budget_metadata(),
             "antennaMaxGainDbi": round(pattern["max_gain_dbi"], 2),
             "horizontalMaxGainDbi": round(pattern["horizontal_max_gain_dbi"], 2),
             "verticalMaxGainDbi": round(pattern["vertical_max_gain_dbi"], 2),
@@ -300,7 +299,11 @@ def solve_rt_result(scene, solver, pattern, quick, direct_only):
             c2 = np.array(centers, dtype=float)
         c2 = c2.reshape(-1, 3)
         pg = np.array(dr.detach(rmap.path_gain), dtype=float).ravel()
-        pr_dbm = CFG.TX_POWER_DBM + 10.0 * np.log10(np.maximum(pg, 1e-30))
+        pr_dbm = (
+            CFG.RSRP_REFERENCE_POWER_DBM
+            + 10.0 * np.log10(np.maximum(pg, 1e-30))
+            - CFG.SYSTEM_LOSS_DB
+        )
 
         pts = []
         for i in range(len(c2)):

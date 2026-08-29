@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>브이월드 3D 지도 - CSV 좌표 이동</title>
-    <link rel="stylesheet" href="css/style.css?v=13" />
+    <link rel="stylesheet" href="css/style.css?v=17" />
     <script type="text/javascript" src="js/config.js?v=2"></script>
     <script type="text/javascript">
       (function () {
@@ -17,14 +17,14 @@
     </script>
     <script type="text/javascript" src="js/csv.js"></script>
     <script type="text/javascript" src="js/rfcolor.js?v=4"></script>
-    <script type="text/javascript" src="js/beampattern.js?v=10"></script>
-    <script type="text/javascript" src="js/main.js?v=19"></script>
-    <script type="text/javascript" src="js/radiationpattern.js?v=13"></script>
-    <script type="text/javascript" src="js/sionna.js?v=22"></script>
-    <script type="text/javascript" src="js/coveragevolume.js?v=2"></script>
-    <script type="text/javascript" src="js/coverageisosurface.js?v=3"></script>
-    <script type="text/javascript" src="js/friisisosurface.js?v=3"></script>
-    <script type="text/javascript" src="js/coveragecomparison.js?v=2"></script>
+    <script type="text/javascript" src="js/beampattern.js?v=11"></script>
+    <script type="text/javascript" src="js/main.js?v=20"></script>
+    <script type="text/javascript" src="js/radiationpattern.js?v=14"></script>
+    <script type="text/javascript" src="js/sionna.js?v=24"></script>
+    <script type="text/javascript" src="js/coveragevolume.js?v=4"></script>
+    <script type="text/javascript" src="js/coverageisosurface.js?v=5"></script>
+    <script type="text/javascript" src="js/friisisosurface.js?v=6"></script>
+    <script type="text/javascript" src="js/coveragecomparison.js?v=11"></script>
     <script type="text/javascript" src="js/help.js?v=1"></script>
     <style>
         /* ---- 모든 RF 화면이 공유하는 단일 RSRP 범례 ---- */
@@ -181,6 +181,8 @@
                     <option value="isotropic">이상적 등방성 (구형)</option>
                 </select>
             </div>
+            <p class="hint">계산 기준: 955MHz · BW 10MHz · 50RB/600 부반송파 · 총 TX 21dBm · RSRP 기준신호 18.22dBm · 케이블 손실 1dB</p>
+            <p class="hint"><strong>Sionna 보류:</strong> 현재 Sionna 화면은 케이블 손실 적용 전 계산값이며, 재계산은 추후 지시에 따라 진행합니다.</p>
             <div class="surface-model-buttons">
                 <button id="btn-coverage-surface" class="tx-btn surface-sionna-btn">Sionna RT 표시</button>
                 <button id="btn-friis-coverage-surface" class="tx-btn surface-friis-btn">Friis 자유공간 표시</button>
@@ -193,7 +195,7 @@
             </div>
             <div id="coverage-surface-summary" class="coverage-volume-summary"></div>
             <div id="friis-coverage-surface-summary" class="coverage-volume-summary"></div>
-            <button id="btn-coverage-distance-table" class="tx-btn distance-table-btn">-100dBm 고도별 최단 거리 표</button>
+            <button id="btn-coverage-distance-table" class="tx-btn distance-table-btn">-100dBm 고도별 수평 도달거리 표</button>
             <div id="coverage-distance-result"></div>
         </div>
 
@@ -339,22 +341,23 @@
         <p><strong>평탄 지면 RT</strong>는 직접파와 지면 정반사를 계산하고, <strong>Sionna 직접파</strong>는 반사 없이 직접 경로만 계산합니다.</p>
 
         <h3>Friis 수식 모드</h3>
-        <p>Sionna를 사용하지 않고 송수신점 사이의 3차원 직선거리와 910MHz 주파수, 측정 H/V 안테나 방향이득으로 자유공간 수신전력을 계산합니다.</p>
+        <p>Sionna를 사용하지 않고 송수신점 사이의 3차원 직선거리와 955MHz 주파수, 측정 H/V 안테나 방향이득으로 자유공간 RSRP를 계산합니다.</p>
         <div class="help-formula">
             <div><span>파장</span><code>λ = c / f</code></div>
             <div><span>3차원 거리</span><code>d = √(E² + N² + (h<sub>rx</sub> − h<sub>tx</sub>)²)</code></div>
             <div><span>자유공간 손실</span><code>FSPL[dB] = 20 log₁₀(4πd / λ)</code></div>
             <div><span>송신 방향이득</span><code>G<sub>t</sub> = G<sub>peak</sub> + G<sub>V,rel</sub>(θ) + G<sub>H,rel</sub>(φ)</code></div>
-            <div><span>수신전력</span><code>P<sub>r</sub>[dBm] = P<sub>t</sub> + G<sub>t</sub> + G<sub>r</sub> − FSPL − L<sub>sys</sub></code></div>
+            <div><span>RSRP</span><code>RSRP[dBm] = (P<sub>RE</sub> + Offset<sub>RS</sub>) + G<sub>t</sub> + G<sub>r</sub> − FSPL − L<sub>sys</sub></code></div>
         </div>
-        <p>현재 설정은 <strong>P<sub>t</sub>=21dBm</strong>, 수신 안테나 <strong>G<sub>r</sub>=0dBi</strong>, 추가 시스템 손실 <strong>L<sub>sys</sub>=0dB</strong>입니다. 장애물·회절·반사·지면 손실은 포함하지 않으므로 자유공간 기준선으로 사용합니다.</p>
+        <p>현재 설정은 <strong>955MHz</strong>, <strong>10MHz</strong>, <strong>50RB/600 부반송파</strong>, 전체 송신출력 <strong>21dBm</strong>, Base RE <strong>18.22dBm</strong>, RS Power Offset <strong>0dB</strong>입니다. RSRP 계산 기준전력은 <strong>18.22dBm</strong>, 수신 안테나는 <strong>G<sub>r</sub>=0dBi</strong>, 케이블 손실을 포함한 시스템 손실은 <strong>L<sub>sys</sub>=1dB</strong>입니다.</p>
+        <p><strong>입력값 확인:</strong> 21dBm을 600개 RE에 균등 분배하면 RE당 약 −6.78dBm입니다. 현재 Base RE 18.22dBm은 총 46dBm에 해당하므로, 장비값 확인 전까지 두 값은 독립 입력값으로 적용합니다.</p>
 
         <h3>코드에서 확인할 위치</h3>
         <ol class="help-code-map">
             <li><code>python/formula_pathloss.py</code><br><strong>free_space_path_loss_db()</strong> — 파장과 FSPL 계산</li>
             <li><code>python/formula_pathloss.py</code><br><strong>calculate_result()</strong> — 3차원 거리·방위각/고도각·H/V 방향이득·수신전력·고도별 격자 계산</li>
             <li><code>python/pattern_loader.py</code><br><strong>load_pattern()</strong> — 제조사 H-Plane/V-Plane 측정 파일을 읽고 방향이득 배열 생성</li>
-            <li><code>python/sionna_config.py</code><br><strong>FREQ_HZ, TX_POWER_DBM, BS_ALT_M, TERMINAL_ALTS_M</strong> — 주파수·출력·기지국/단말 고도 등 입력값</li>
+            <li><code>python/sionna_config.py</code><br><strong>FREQ_HZ, BANDWIDTH_MHZ, NUMBER_OF_RB, SUBCARRIERS, TOTAL_TX_POWER_DBM, BASE_RE_POWER_DBM, RS_POWER_OFFSET_DB, CABLE_LOSS_DB</strong> — LTE 주파수·대역폭·전력·케이블 손실 입력값</li>
             <li><code>Data/sionna/formula_pathloss.json</code><br>계산된 고도별 좌표·RSRP와 통계 결과</li>
             <li><code>js/sionna.js</code><br><strong>DATA_SOURCES.formula</strong>에서 결과 파일 지정 → <strong>fetchSource()</strong>로 로드 → <strong>loadData()</strong>와 지도 표시 함수에서 시각화</li>
         </ol>
@@ -443,7 +446,7 @@
             <li><code>Data/sionna/sionna_volume_surface.json</code> — 새 패턴으로 생성한 Sionna 연속 경계면 결과</li>
             <li><code>js/coverageisosurface.js</code><br><strong>renderSurface()</strong> — 지도 좌표로 변환해 반투명 연속 3D 표면 표시</li>
             <li><code>python/formula_coverage_surface_3d.py</code><br><strong>boundary_distance_m()</strong> — Friis 임계거리 계산<br><strong>build_surface()</strong> — 자유공간 3D 경계면 생성</li>
-            <li><code>js/coveragecomparison.js</code><br><strong>minimumDistanceAtAltitude()</strong> — 고도 평면과 경계면 교차점까지의 최단 3D 거리 계산</li>
+            <li><code>js/coveragecomparison.js</code><br><strong>minimumDistanceAtAltitude()</strong> — 선택 고도에서 기지국 좌표부터 경계점까지의 최단 수평 도달거리 계산</li>
         </ol>
     </div>
     <div id="help-coverage-volume" class="help-source" hidden>

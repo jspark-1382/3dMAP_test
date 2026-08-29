@@ -719,7 +719,7 @@ var SIONNA = (function () {
     function fetchSource(sourceKey) {
         var key = DATA_SOURCES[sourceKey] ? sourceKey : "reflected";
         if (dataBySource[key]) return Promise.resolve(dataBySource[key]);
-        return fetch(sourceInfo(key).url).then(function (res) {
+        return fetch(sourceInfo(key).url, {cache: "no-store"}).then(function (res) {
             if (!res.ok) throw new Error("HTTP " + res.status);
             return res.json();
         }).then(function (json) {
@@ -786,10 +786,14 @@ var SIONNA = (function () {
         }
         html += '</table>';
         html += '<div class="alt-note">' + (data.meta.tool || sourceInfo(currentSource).label) + ' · ' +
-            data.meta.frequencyMHz + 'MHz · TX ' +
-            data.meta.txPowerDbm + 'dBm · 안테나 ' + data.meta.antennaMaxGainDbi +
+            data.meta.frequencyMHz + 'MHz · 총 TX ' +
+            data.meta.txPowerDbm + 'dBm · RSRP 기준신호 ' +
+            Number(data.meta.rsrpReferencePowerDbm || data.meta.txPowerDbm).toFixed(2) + 'dBm · 안테나 ' + data.meta.antennaMaxGainDbi +
             ' dBi (' + data.meta.antennaModel + ') · 설치고도 ' + data.meta.antennaHeightM +
             'm · 격자 ' + data.meta.cellSizeM + 'm</div>';
+        if (data.meta.cableLossDb === undefined) {
+            html += '<p class="hint"><strong>참고:</strong> 현재 Sionna 파일은 케이블 손실 1dB 적용 전 결과입니다. 재계산은 추후 지시에 따라 진행합니다.</p>';
+        }
         html += '<p class="hint">-100 dBm은 수신 가능률 계산용 보조 판정선이며, 위 절대 RSRP와 색상 범례의 기준값이 아닙니다.</p>';
         box.innerHTML = html;
     }
@@ -803,8 +807,10 @@ var SIONNA = (function () {
             box.innerHTML = '<p class="hint">비교 가능한 공통 고도 결과가 없습니다.</p>';
             return;
         }
+        var pendingLoss = reflected.meta.cableLossDb === undefined || freeSpace.meta.cableLossDb === undefined;
         var html = '<div class="alt-note"><strong>세 모델 절대 RSRP 비교</strong><br>' +
-            '평탄=Sionna 반사 포함 · 직접파=Sionna 직접파만</div>' +
+            '평탄=Sionna 반사 포함 · 직접파=Sionna 직접파만' +
+            (pendingLoss ? '<br><strong>주의:</strong> Sionna는 케이블 손실 1dB 적용 전 결과이며 Friis만 1dB가 반영되었습니다.' : '') + '</div>' +
             '<div class="alt-table-scroll"><table class="alt-table alt-table-compact">' +
             '<tr><th>고도</th><th>평탄</th><th>직접파</th><th>Friis</th></tr>';
         for (var i = 0; i < rows.length; i++) {

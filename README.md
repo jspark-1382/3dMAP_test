@@ -59,7 +59,7 @@ Idx, CID_1, Time, [LTE][L1][RF]PCI, [LTE][L1][RF]RSRP (dBm)(dBm), [General][GPS]
   dB 가시화/진폭/전력 반경 비교(커버리지·지면 절단과 분리)
 - [x] Sionna 고도면 적층 보기 — 고도별 실제 계산 셀 중 설정한 RSRP 기준 이상만
   색상점·임계 경계·고도 연결선으로 독립 표시(기본 -100dBm)
-- [x] Sionna/Friis -100dBm 연속 3D 경계면 — 두 모델 동시 표시와 고도별 최단거리 비교표
+- [x] Sionna/Friis -100dBm 연속 3D 경계면 — 200m 이하를 제외한 고도별 최단~최장 수평거리 비교와 실제 고도 평면 반경 표시
   계산에서 수평/상단 경계 안에 닫힌 등가면 메시 추출
 - [x] 기존 3D 방향성 표시 — 260827 이중 야기+옴니 H/V 합성 형상 또는 선택한 커버리지 결과를
   방위각×고도각 5° 빈으로 변환한 분석용 형상(안테나 고유 패턴과 구분)
@@ -76,7 +76,7 @@ js/radiationpattern.js # 측정 H/V 안테나 고유 방사 패턴 표시
 js/coveragevolume.js  # Sionna RSRP 임계값 기반 3D 수신 가능 볼륨
 js/coverageisosurface.js # 별도 Sionna 계산의 -100dBm 연속 3D 등가면
 js/friisisosurface.js # Friis 자유공간 -100dBm 연속 3D 등가면
-js/coveragecomparison.js # 두 경계면의 고도별 최단 3D 거리 비교표
+js/coveragecomparison.js # 두 경계면의 고도별 최단 수평 도달거리 비교표와 지도 선
 js/main.js            # VWORLD 3D(webglMapInit) + 지도 + CSV 연동
 sample/drone_data.csv # 테스트용 CSV
 test/test_csv.js      # CSV 파서 Node 검증
@@ -91,7 +91,7 @@ python/export_antenna_pattern_catalog.py # 로컬 전용 옴니/야기/합성 �
 
 ## Sionna RT 커버리지 예측 (선택)
 
-이중 야기 + 옴니 합성 패턴(`Data/pattern/260827_pattern.xlsx`의 `야기+옴니` 시트, 910MHz 계산)을 적용해
+이중 야기 + 옴니 합성 패턴(`Data/pattern/260827_pattern.xlsx`의 `야기+옴니` 시트, 955MHz 계산)을 적용해
 기지국(34°36'45.7"N 127°12'21.5"E) 주변의 수신 전력을 레이트레이싱으로 예측하고,
 단말 고도 100~2000m 구간별 커버리지를 지도 위에 표시합니다. 동일한 Sionna RT 설정에서
 지면 정반사만 끈 자유공간 직접파 결과도 함께 생성해 동일 셀의 절대 RSRP를 비교할 수 있습니다.

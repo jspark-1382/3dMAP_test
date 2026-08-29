@@ -76,7 +76,7 @@ var RADIATION_PATTERN = (function () {
         for (i = -180; i <= 180; i++) phi.push(i);
         return {
             key: "isotropic", label: "이상적 등방성 기준", model: "Ideal isotropic reference",
-            sourceSheet: "수식 기준", frequencyMHz: 910, maxGainDbi: 0,
+            sourceSheet: "수식 기준", frequencyMHz: 955, maxGainDbi: 0,
             cutAngleDeg: angles, horizontalCutRelativeGainDb: zeros.slice(0),
             verticalCutRelativeGainDb: zeros.slice(0), thetaDeg: theta,
             vertical3dRelativeGainDb: theta.map(function () { return 0; }), phiDeg: phi,
@@ -104,7 +104,7 @@ var RADIATION_PATTERN = (function () {
         return {
             key: "idealOmni", label: "이상적 옴니 기준 (도넛형)",
             model: "Ideal azimuth-omnidirectional reference", sourceSheet: "수식 기준",
-            frequencyMHz: 910, maxGainDbi: 0, cutAngleDeg: angles,
+            frequencyMHz: 955, maxGainDbi: 0, cutAngleDeg: angles,
             horizontalCutRelativeGainDb: hCut, verticalCutRelativeGainDb: vCut,
             thetaDeg: theta, vertical3dRelativeGainDb: v3d,
             phiDeg: phi, horizontal3dRelativeGainDb: h3d
@@ -126,7 +126,7 @@ var RADIATION_PATTERN = (function () {
         var meta = BEAMPATTERN.getPatternMeta ? BEAMPATTERN.getPatternMeta() : {};
         return {
             key: "combined", label: "현재 H/V 합성 패턴", model: meta.model || "현재 안테나 패턴",
-            sourceSheet: meta.sourceSheet || "antenna_pattern.json", frequencyMHz: meta.frequencyMHz || 910,
+            sourceSheet: meta.sourceSheet || "antenna_pattern.json", frequencyMHz: meta.frequencyMHz || 955,
             maxGainDbi: meta.maxGainDbi || 0, cutAngleDeg: angles,
             horizontalCutRelativeGainDb: hCut, verticalCutRelativeGainDb: vCut,
             thetaDeg: theta, vertical3dRelativeGainDb: v3d,
@@ -565,7 +565,7 @@ var RADIATION_PATTERN = (function () {
     function updateAnalyzerSummary(pattern) {
         var summary = $("pattern-analyzer-summary");
         if (!summary || !pattern) return;
-        summary.innerHTML = "<strong>" + pattern.label + "</strong> · " + (pattern.frequencyMHz || 910) +
+        summary.innerHTML = "<strong>" + pattern.label + "</strong> · " + (pattern.frequencyMHz || 955) +
             "MHz · 피크 " + Number(pattern.maxGainDbi || 0).toFixed(2) + "dBi · " +
             weakDetailLabel(getNumber("radiation-db-floor", -40)) + "<br>" +
             "파란색=수평 H-Plane · 주황색=수직 V-Plane · 상대이득 전용(거리/RSRP 아님)";

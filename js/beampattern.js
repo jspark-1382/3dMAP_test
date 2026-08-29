@@ -233,7 +233,7 @@ var BEAMPATTERN = (function () {
         configuration: "dual Yagi + omni",
         sourceFile: "260827_pattern.xlsx",
         sourceSheet: "야기+옴니",
-        frequencyMHz: 910,
+        frequencyMHz: 955,
         maxGainDbi: 7.2,
         approximation: "dual Yagi + omni measured H/V separable 3D"
     };

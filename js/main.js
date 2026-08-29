@@ -1135,7 +1135,7 @@ function localToCartesian(e, n, u) {
                 msg += " · 하부 전파 볼륨(상단 절단 @ 단말 고도 " + clipAltTop + "m)";
             }
         } else {
-            msg = "기존 3D 방향성 표시 [260827 이중 야기+옴니 H/V 합성]: 표시배율 " + scale + "m · 910MHz";
+            msg = "기존 3D 방향성 표시 [260827 이중 야기+옴니 H/V 합성]: 표시배율 " + scale + "m · 955MHz";
             var tilt = getBeamTilt(), swing = getBeamSwing();
             if (tilt) msg += " · 틸트 " + tilt + "°";
             if (tilt || swing) msg += " · 스윙 " + swing + "°";

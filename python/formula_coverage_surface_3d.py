@@ -34,8 +34,8 @@ OUTPUT_FILE = os.path.normpath(
 def boundary_distance_m(tx_gain_dbi, threshold_dbm):
     """Friis 식을 역으로 풀어 임계 RSRP가 되는 3차원 거리를 구한다."""
     allowed_path_loss_db = (
-        float(CFG.TX_POWER_DBM) + np.asarray(tx_gain_dbi, dtype=float)
-        - float(threshold_dbm)
+        float(CFG.RSRP_REFERENCE_POWER_DBM) + np.asarray(tx_gain_dbi, dtype=float)
+        - float(CFG.SYSTEM_LOSS_DB) - float(threshold_dbm)
     )
     wavelength_m = LIGHT_SPEED_MPS / float(CFG.FREQ_HZ)
     return wavelength_m / (4.0 * math.pi) * np.power(10.0, allowed_path_loss_db / 20.0)
@@ -141,8 +141,7 @@ def build_surface(pattern, threshold_dbm=-100.0, az_step_deg=3.0, theta_step_deg
             "generated": dt.datetime.now().isoformat(timespec="seconds"),
             "calculation": "analytical RSRP threshold distance by azimuth/elevation",
             "environment": "free space",
-            "frequencyMHz": int(CFG.FREQ_HZ / 1e6),
-            "txPowerDbm": CFG.TX_POWER_DBM,
+            **CFG.link_budget_metadata(),
             "antennaModel": pattern["model"],
             "antennaConfiguration": pattern.get("configuration"),
             "antennaSourceFile": pattern.get("source_file"),

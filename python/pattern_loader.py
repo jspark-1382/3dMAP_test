@@ -124,7 +124,7 @@ def _power_average_db(values_db):
 
 def load_pattern(
     path: str | None = None,
-    freq: str = "910",
+    freq: str = "955",
     sheet_name: str = DEFAULT_PATTERN_SHEET,
 ) -> Dict:
     if path is None:
@@ -248,7 +248,7 @@ def load_pattern(
 
 
 if __name__ == "__main__":
-    p = load_pattern(freq="910")
+    p = load_pattern(freq="955")
     print("model:", p["model"])
     print("frequency:", p["freq_mhz"], "MHz")
     print("horizontal max:", round(p["horizontal_max_gain_dbi"], 2), "dBi")

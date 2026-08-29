@@ -37,7 +37,7 @@ var FRIIS_ISOSURFACE = (function () {
     }
     function loadBaseData() {
         if (baseDataCache) return Promise.resolve(baseDataCache);
-        return fetch(DATA_URL).then(function (response) {
+        return fetch(DATA_URL, {cache: "no-store"}).then(function (response) {
             if (!response.ok) throw new Error("HTTP " + response.status);
             return response.json();
         }).then(function (json) { baseDataCache = json; return json; });
@@ -51,7 +51,7 @@ var FRIIS_ISOSURFACE = (function () {
     }
     function idealIsotropicPattern() {
         return {
-            key: "isotropic", label: "이상적 등방성 (구형)", frequencyMHz: 910,
+            key: "isotropic", label: "이상적 등방성 (구형)",
             maxGainDbi: 0, thetaDeg: [0, 180], vertical3dRelativeGainDb: [0, 0],
             phiDeg: [-180, 180], horizontal3dRelativeGainDb: [0, 0]
         };
@@ -132,14 +132,18 @@ var FRIIS_ISOSURFACE = (function () {
         var templateMeta = templateData.meta || {};
         var azimuthStep = Number(templateMeta.azimuthStepDeg) || 3;
         var thetaStep = Number(templateMeta.thetaStepDeg) || 2;
-        var txPowerDbm = Number(templateMeta.txPowerDbm);
-        var frequencyMHz = Number(pattern.frequencyMHz || templateMeta.frequencyMHz || 910);
+        var referencePowerDbm = Number(templateMeta.rsrpReferencePowerDbm);
+        var systemLossDb = Number(templateMeta.systemLossDb);
+        var frequencyMHz = Number(templateMeta.frequencyMHz || pattern.frequencyMHz || 955);
         var antennaHeightM = Number(templateMeta.antennaHeightM) || 16;
         var peakGainDbi = Number(pattern.maxGainDbi) || 0;
         var azimuths = [], thetas = [], vertices = [], triangles = [];
         var minimumDistance = Infinity, maximumDistance = 0, maximumAltitude = 0;
         var azimuth, theta, azimuthIndex, thetaIndex;
-        if (!isFinite(txPowerDbm)) txPowerDbm = 21;
+        if (!isFinite(referencePowerDbm)) referencePowerDbm = Number(templateMeta.txPowerDbm);
+        if (!isFinite(referencePowerDbm)) referencePowerDbm = 18.22;
+        if (!isFinite(systemLossDb)) systemLossDb = Number(templateMeta.cableLossDb);
+        if (!isFinite(systemLossDb)) systemLossDb = 0;
         for (azimuth = -180; azimuth < 180 - 0.000001; azimuth += azimuthStep) azimuths.push(azimuth);
         for (theta = 0; theta <= 180 + 0.000001; theta += thetaStep) thetas.push(theta);
         for (azimuthIndex = 0; azimuthIndex < azimuths.length; azimuthIndex++) {
@@ -148,7 +152,8 @@ var FRIIS_ISOSURFACE = (function () {
                 var elevationDeg = 90 - thetas[thetaIndex];
                 var relativeGain = RADIATION_PATTERN.directionGain(pattern, azimuths[azimuthIndex], elevationDeg);
                 var distance = boundaryDistanceM(
-                    peakGainDbi + relativeGain, thresholdDbm, txPowerDbm, frequencyMHz
+                    peakGainDbi + relativeGain - systemLossDb,
+                    thresholdDbm, referencePowerDbm, frequencyMHz
                 );
                 minimumDistance = Math.min(minimumDistance, distance);
                 maximumDistance = Math.max(maximumDistance, distance);
@@ -178,7 +183,16 @@ var FRIIS_ISOSURFACE = (function () {
             meta: {
                 tool: "Friis formula (browser analytical)", environment: "free space",
                 calculation: "analytical RSRP threshold distance by azimuth/elevation",
-                frequencyMHz: frequencyMHz, txPowerDbm: txPowerDbm,
+                frequencyMHz: frequencyMHz,
+                bandwidthMHz: templateMeta.bandwidthMHz,
+                numberOfResourceBlocks: templateMeta.numberOfResourceBlocks,
+                subcarriers: templateMeta.subcarriers,
+                txPowerDbm: templateMeta.txPowerDbm,
+                baseRePowerDbm: templateMeta.baseRePowerDbm,
+                rsPowerOffsetDb: templateMeta.rsPowerOffsetDb,
+                rsrpReferencePowerDbm: referencePowerDbm,
+                cableLossDb: templateMeta.cableLossDb,
+                systemLossDb: systemLossDb,
                 antennaModel: pattern.label || pattern.model || "선택 안테나",
                 antennaMaxGainDbi: peakGainDbi, thresholdDbm: Number(thresholdDbm),
                 azimuthStepDeg: azimuthStep, thetaStepDeg: thetaStep,
@@ -299,7 +313,10 @@ var FRIIS_ISOSURFACE = (function () {
         box.style.display = "block";
         box.innerHTML = "<strong>Friis 자유공간 · RSRP = " + meta.thresholdDbm +
             "dBm 경계면</strong><br>" + (meta.antennaModel || "선택 안테나") +
-            " · 북 0°/동 90° · " + Number(meta.triangleCount).toLocaleString() + " triangles<br>" +
+            " · " + meta.frequencyMHz + "MHz · 기준신호 " +
+            Number(meta.rsrpReferencePowerDbm).toFixed(2) + "dBm · 케이블 손실 " +
+            Number(meta.cableLossDb || meta.systemLossDb || 0).toFixed(1) + "dB<br>" +
+            "북 0°/동 90° · " + Number(meta.triangleCount).toLocaleString() + " triangles<br>" +
             "<strong>주황색 표면</strong> · 최대 경계거리 " +
             (Number(meta.maximumBoundaryDistanceM) / 1000).toFixed(1) + "km<br>" +
             "RSRP 기준은 전체 크기를 바꾸며, 원형 여부는 선택한 안테나의 H-Plane으로 결정됩니다.";

@@ -28,7 +28,7 @@ var SIONNA_ISOSURFACE = (function () {
 
     function loadData() {
         if (dataCache) return Promise.resolve(dataCache);
-        return fetch(DATA_URL).then(function (response) {
+        return fetch(DATA_URL, {cache: "no-store"}).then(function (response) {
             if (!response.ok) throw new Error("HTTP " + response.status);
             return response.json();
         }).then(function (json) {
@@ -164,11 +164,16 @@ var SIONNA_ISOSURFACE = (function () {
         box.className = "coverage-volume-summary" + (closed ? "" : " warning");
         box.style.display = "block";
         box.innerHTML = "<strong>Sionna RT · RSRP = " + meta.thresholdDbm +
-            "dBm 연속 경계면</strong><br>별도 3D 계산 " +
+            "dBm 연속 경계면</strong><br>" + meta.frequencyMHz +
+            "MHz · 기준신호 " +
+            Number(meta.rsrpReferencePowerDbm || meta.txPowerDbm).toFixed(2) +
+            "dBm · 별도 3D 계산 " +
             (meta.horizontalSizeM / 1000).toFixed(0) + "km × " +
             (meta.horizontalSizeM / 1000).toFixed(0) + "km · 고도 0.1~" +
             (Math.max.apply(null, meta.altitudesM) / 1000).toFixed(0) + "km · " +
             Number(meta.triangleCount).toLocaleString() + " triangles" +
+            (meta.cableLossDb === undefined ?
+                "<br><strong>참고: 케이블 손실 1dB 적용 전 Sionna 결과</strong>" : "") +
             (closed ? "<br><strong>✓ 수평·상단 계산 경계 안에서 닫힌 형상</strong>" :
                 "<br><strong>⚠ 계산영역 경계에 도달한 형상</strong>");
     }
